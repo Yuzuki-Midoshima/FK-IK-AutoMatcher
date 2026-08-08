@@ -13,6 +13,9 @@ class MatchService:
     # Treat bends shallower than about 0.6 degrees as straight. Tiny numerical
     # bends are not reliable enough to choose a pole side.
     _STRAIGHT_TOLERANCE = 1.0e-2
+    # A pole almost on the start/end axis has no stable side. Normalizing that
+    # tiny vector magnifies scene-evaluation noise and can send the limb across.
+    _POLE_DIRECTION_TOLERANCE = 1.0e-2
 
     def __init__(self, cmds_module=None):
         if cmds_module is None:
@@ -54,7 +57,7 @@ class MatchService:
                 length = sqrt(sum(value * value for value in direction))
             else:
                 current = self._current_pole_direction(settings, projection, line)
-                if self._length_sq(current) > self._EPSILON and self._dot(direction, current) < 0.0:
+                if self._has_stable_pole_direction(current, line) and self._dot(direction, current) < 0.0:
                     direction = tuple(-value for value in direction)
             position = tuple(
                 middle[i] + direction[i] / length * settings.pole_distance
@@ -73,7 +76,7 @@ class MatchService:
     def _straight_chain_direction(self, settings, projection, line):
         """Keep the current pole side, then fall back to the joint preferred angle."""
         direction = self._current_pole_direction(settings, projection, line)
-        if self._length_sq(direction) > self._EPSILON:
+        if self._has_stable_pole_direction(direction, line):
             return direction
 
         direction = self._preferred_angle_direction(settings.middle_joint, line)
@@ -100,6 +103,10 @@ class MatchService:
             if self._length_sq(direction) > self._EPSILON:
                 return direction
         return (0.0, 0.0, 0.0)
+
+    def _has_stable_pole_direction(self, direction, line):
+        minimum_sq = self._length_sq(line) * self._POLE_DIRECTION_TOLERANCE ** 2
+        return self._length_sq(direction) > max(self._EPSILON, minimum_sq)
 
     def _preferred_angle_direction(self, joint, line):
         try:

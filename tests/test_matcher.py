@@ -63,6 +63,11 @@ class StraightChainTests(unittest.TestCase):
         MatchService(cmds).fk_to_ik(settings())
         self.assertEqual(cmds.pole_result, (5.0, 4.0, 0.0))
 
+    def test_ignores_unstable_pole_direction_near_chain_axis(self):
+        cmds = FakeCmds(pole=(5.0, -0.001, 0.0), preferred=(0.0, 0.0, 20.0))
+        MatchService(cmds).fk_to_ik(settings())
+        self.assertEqual(cmds.pole_result, (5.0, 4.0, 0.0))
+
     def test_negative_preferred_angle_reverses_direction(self):
         cmds = FakeCmds(pole=(5.0, 0.0, 0.0), preferred=(0.0, 0.0, -20.0))
         MatchService(cmds).fk_to_ik(settings())
