@@ -10,6 +10,10 @@ from .models import MatchSettings
 
 class RigResolver:
     MANIFEST_ATTR = "rigModuleBuilderManifest"
+    GENERIC_NAME_PARTS = {
+        "ctrl", "control", "ctl", "jnt", "joint", "grp", "group",
+        "zero", "offset", "fk", "ik", "pv", "pole", "rig",
+    }
 
     def __init__(self, cmds_module=None):
         if cmds_module is None:
@@ -80,6 +84,8 @@ class RigResolver:
         prefix = namespace + ":" if namespace else ""
         transforms = self.cmds.ls(prefix + "*", type="transform", long=True) or []
         joints = self.cmds.ls(prefix + "*", type="joint", long=True) or []
+        transforms = self._context_candidates(transforms, selected, minimum=3)
+        joints = self._context_candidates(joints, selected, minimum=3)
         fk_controls = self._ordered(self._filter(transforms, r"(^|_)FK(_|.*CTRL)"))
         ik_joints = self._ordered(self._filter(joints, r"(^|_)IK(_|.*JNT)"))
         deform = self._best_deform_chain(joints)
@@ -141,6 +147,23 @@ class RigResolver:
 
     def _ordered(self, nodes):
         return sorted(nodes, key=lambda node: self._leaf(node).lower())
+
+    def _context_candidates(self, nodes, selected, minimum):
+        """Prefer nodes describing the same limb as the selected control."""
+        selected_parts = self._name_parts(selected) - self.GENERIC_NAME_PARTS
+        selected_parts = {part for part in selected_parts if len(part) >= 3}
+        if not selected_parts:
+            return nodes
+        matches = [
+            node for node in nodes
+            if selected_parts & (self._name_parts(node) - self.GENERIC_NAME_PARTS)
+        ]
+        return matches if len(matches) >= minimum else nodes
+
+    def _name_parts(self, node):
+        leaf = self._leaf(node).rsplit(":", 1)[-1]
+        leaf = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", leaf)
+        return {part.lower() for part in re.split(r"[^A-Za-z0-9]+", leaf) if part}
 
     @staticmethod
     def _leaf(node):
