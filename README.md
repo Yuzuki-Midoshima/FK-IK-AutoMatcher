@@ -1,32 +1,32 @@
-# FK/IK Auto Matcher for Maya
+# Maya用 FK/IK Auto Matcher
 
-A pose-matching tool for Autodesk Maya 2026 that aligns FK and IK controls in either direction. It is intended for riggers, technical artists, and technical animators working with three-point limb chains.
+FK と IK のコントロールを双方向に整合させる、Autodesk Maya 2026 用のポーズマッチングツールです。3 点のリムチェーンを扱うリガー、テクニカルアーティスト、テクニカルアニメーターを対象としています。
 
-## Demo
+## デモ
 
-Demo images and videos will be added under [`docs/media/`](docs/media/). Keeping portfolio media in this directory makes it possible to update the presentation without changing the Maya package.
+デモ画像と動画は [`docs/media/`](docs/media/) に追加する予定です。ポートフォリオ用のメディアをこのディレクトリにまとめることで、Maya パッケージを変更せずにプレゼンテーションを更新できます。
 
-## Overview
+## 概要
 
-Select a node from an FK/IK rig and let the tool resolve the relevant controls and joints. Rig data is read from a Rig Module Builder manifest when one is available; otherwise, the resolver performs conservative discovery using scene names and connections. Every match is wrapped in one Maya undo chunk.
+FK/IK リグのノードを選択すると、ツールが関連するコントロールとジョイントを特定します。Rig Module Builder のマニフェストが利用できる場合は、そこからリグデータを読み取ります。利用できない場合は、シーン内の名前と接続情報を使用して慎重に検索します。各マッチング処理は、Maya の 1 つの Undo チャンクにまとめられます。
 
-## Features
+## 機能
 
-- Matches FK to IK by positioning the IK controller and pole-vector controller.
-- Matches IK to FK by applying IK-joint rotations to the FK controllers.
-- Preserves a stable pole-vector side and uses the middle joint's preferred angle as a fallback for straight chains.
-- Resolves rig data from a `rigModuleBuilderManifest` network-node attribute.
-- Provides conservative namespace- and limb-aware scene discovery when no manifest is available.
-- Supports manual correction of resolved nodes and FK/IK switch settings.
-- Saves and loads matcher settings as JSON.
-- Groups each match into a single Maya undo operation.
+- IK コントローラーとポールベクターコントローラーを配置し、FK から IK へマッチング
+- IK ジョイントの回転を FK コントローラーへ適用し、IK から FK へマッチング
+- ポールベクターの向きを安定して維持し、直線状のチェーンでは中間ジョイントの優先角度をフォールバックとして使用
+- `rigModuleBuilderManifest` ネットワークノードのアトリビュートからリグデータを解決
+- マニフェストがない場合に、名前空間とリムを考慮した慎重なシーン検索を実行
+- 解決されたノードと FK/IK 切り替え設定の手動修正に対応
+- マッチャー設定を JSON 形式で保存および読み込み
+- 各マッチングを Maya の 1 回の Undo 操作に集約
 
-## Installation
+## インストール
 
-1. Download or clone this repository to a location available to Maya.
-2. Add the repository root to Maya's Python path, or run the included launcher by its full path.
+1. このリポジトリを、Maya からアクセスできる場所にダウンロードまたはクローンします。
+2. リポジトリのルートを Maya の Python パスへ追加するか、付属ランチャーをフルパスで実行します。
 
-From Maya's Python Script Editor:
+Maya の Python スクリプトエディタから実行する場合：
 
 ```python
 import runpy
@@ -34,7 +34,7 @@ import runpy
 runpy.run_path(r"<path-to-repository>/launch_fk_ik_auto_matcher.py")
 ```
 
-If the repository root is already on `PYTHONPATH`:
+リポジトリのルートがすでに `PYTHONPATH` に含まれている場合：
 
 ```python
 from fk_ik_auto_matcher import show
@@ -42,77 +42,77 @@ from fk_ik_auto_matcher import show
 show()
 ```
 
-`reload_fk_ik_auto_matcher.py` is provided as a development helper for reloading the package during a Maya session.
+`reload_fk_ik_auto_matcher.py` は、Maya セッション中にパッケージを再読み込みするための開発用ヘルパーです。
 
-## Usage
+## 使い方
 
-1. Select one node belonging to the target FK/IK limb.
-2. Open the tool and use the selected node as the detection reference.
-3. Review the resolved controls, joints, switch attribute, and pole-vector settings.
-4. Run **FK to IK** or **IK to FK**.
-5. If automatic discovery is not appropriate for the rig, enter the nodes manually and optionally save the settings as JSON.
+1. 対象の FK/IK リムに属するノードを 1 つ選択します。
+2. ツールを開き、選択したノードを検出基準として使用します。
+3. 解決されたコントロール、ジョイント、切り替えアトリビュート、ポールベクター設定を確認します。
+4. **FK to IK** または **IK to FK** を実行します。
+5. 自動検索がリグに適さない場合は、ノードを手動で入力し、必要に応じて設定を JSON として保存します。
 
-## Technical Highlights
+## 技術的な特長
 
-- Maya dependencies are injected at the service boundary, allowing matching and resolver logic to be tested with command-module fakes.
-- Maya and PySide6 imports are lazy at the package entry point, so non-UI modules remain importable in standard Python.
-- Pole-vector placement handles bent, nearly straight, and straight chains without normalizing an unstable near-axis direction.
-- Settings use a typed dataclass with UTF-8 JSON serialization.
-- Rig discovery prefers explicit manifest data over naming heuristics.
+- Maya への依存をサービス境界で注入し、コマンドモジュールのフェイクを使ってマッチングとリゾルバーのロジックをテスト可能
+- パッケージのエントリーポイントで Maya と PySide6 を遅延インポートし、UI 以外のモジュールを標準 Python 環境でもインポート可能
+- 不安定な軸付近の方向を正規化せず、曲がったチェーン、ほぼ直線のチェーン、直線のチェーンすべてに対応したポールベクター配置
+- 型付きデータクラスと UTF-8 の JSON シリアライズを使用した設定管理
+- 名前の推測よりも明示的なマニフェストデータを優先するリグ検索
 
-## Project Structure
+## プロジェクト構成
 
 ```text
-fk_ik_auto_matcher/          Maya package
-  main.py                    Maya/PySide6 entry point
-  ui.py                      User interface
-  matcher.py                 FK/IK matching operations
-  resolver.py                Manifest and scene discovery
-  models.py                  Serializable settings model
-tests/                       Maya-independent unit tests
-docs/media/                  Demo media placeholder
-launch_fk_ik_auto_matcher.py Shelf-friendly launcher
-reload_fk_ik_auto_matcher.py Development reload helper
+fk_ik_auto_matcher/          Maya パッケージ
+  main.py                    Maya/PySide6 エントリーポイント
+  ui.py                      ユーザーインターフェース
+  matcher.py                 FK/IK マッチング処理
+  resolver.py                マニフェストとシーンの検索
+  models.py                  シリアライズ可能な設定モデル
+tests/                       Maya に依存しないユニットテスト
+docs/media/                  デモメディア用プレースホルダー
+launch_fk_ik_auto_matcher.py シェルフ向けランチャー
+reload_fk_ik_auto_matcher.py 開発用リロードヘルパー
 ```
 
-The existing flat package layout is intentional: it keeps Maya's import and launcher workflow straightforward.
+既存のフラットなパッケージ構成は意図的なものです。これにより、Maya でのインポートとランチャーのワークフローをシンプルに保っています。
 
-## Requirements
+## 動作要件
 
 - Autodesk Maya 2026
-- Python 3.11 (included with Maya 2026)
-- PySide6 and shiboken6 (included with Maya 2026)
+- Python 3.11（Maya 2026 に同梱）
+- PySide6 および shiboken6（Maya 2026 に同梱）
 
-The matcher targets start, middle, and end nodes in a three-point limb chain. Rig-specific systems such as custom stretch or matrix-network synchronization are outside its current scope.
+このマッチャーは、3 点のリムチェーンにおける開始、中間、終了ノードを対象とします。カスタムストレッチやマトリックスネットワークの同期など、リグ固有のシステムは現在の対象外です。
 
-## Testing
+## テスト
 
-### Automated Tests
+### 自動テスト
 
-The automated suite covers settings serialization, switch-plug construction, limb-context filtering, and pole-vector behavior using a fake `maya.cmds` boundary. It does not require Maya:
+自動テストスイートでは、フェイクの `maya.cmds` 境界を使用し、設定のシリアライズ、切り替えプラグの構築、リムコンテキストのフィルタリング、ポールベクターの動作を検証します。Maya は必要ありません。
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-GitHub Actions also compiles every tracked Python file and verifies imports for the Maya-independent package surface.
+GitHub Actions では、追跡対象のすべての Python ファイルをコンパイルし、Maya に依存しないパッケージ部分のインポートも検証します。
 
-### Maya Manual Tests
+### Maya 手動テスト
 
-The following behavior requires an installed copy of Maya and a representative FK/IK rig:
+以下の動作確認には、インストール済みの Maya と検証用の FK/IK リグが必要です。
 
-- Launching and reopening the PySide6 window.
-- Manifest-based and scene-based discovery against real Maya nodes.
-- FK-to-IK and IK-to-FK matching across bent and straight limb poses.
-- Pole-vector orientation and preferred-angle fallback.
-- FK/IK switch updates, selection callbacks, and button-state updates.
-- Single-step Maya Undo after each match.
-- JSON save/load through Maya file dialogs.
+- PySide6 ウィンドウの起動と再表示
+- 実際の Maya ノードに対する、マニフェストベースおよびシーンベースの検索
+- 曲がったリムと直線状のリムにおける FK から IK、および IK から FK へのマッチング
+- ポールベクターの向きと優先角度によるフォールバック
+- FK/IK 切り替えの更新、選択コールバック、ボタン状態の更新
+- 各マッチング後に Maya で 1 回の Undo が可能であること
+- Maya のファイルダイアログを使用した JSON の保存と読み込み
 
-## Development Workflow
+## 開発ワークフロー
 
-Create changes on `feature/*`, `fix/*`, or `chore/*` branches, open a pull request to `main`, and merge only after CI passes. Keep `main` in a stable, portfolio-ready state.
+変更は `feature/*`、`fix/*`、または `chore/*` ブランチで作成し、`main` に対するプルリクエストを開いて、CI が成功した後にのみマージしてください。`main` は安定したポートフォリオ公開可能な状態に保ちます。
 
-## License
+## ライセンス
 
-Licensed under the [MIT License](LICENSE).
+[MIT License](LICENSE) のもとでライセンスされています。
