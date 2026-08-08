@@ -1,17 +1,41 @@
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Test and coverage output
 .coverage
+.coverage.*
 htmlcov/
+
+# Virtual environments and packaging output
 .venv/
 venv/
-.idea/
+build/
+dist/
+*.egg-info/
+
+# Editors and IDEs
 .vscode/
-.DS_Store
-Thumbs.db
-*.ma
-*.mb
+.idea/
+*.code-workspace
+
+# Logs
+*.log
+
+# Maya-generated backup, autosave, and preview data
+autosave/
+backup/
+mayaSwatches/
 *.autosave
+*.ma~
+*.mb~
+*.swatches
+
+# Operating-system metadata
+Thumbs.db
+Desktop.ini
+.DS_Store
