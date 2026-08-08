@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile Python sources
+        run: python -m compileall -q -f fk_ik_auto_matcher tests launch_fk_ik_auto_matcher.py reload_fk_ik_auto_matcher.py
+
+      - name: Run Maya-independent unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Verify Maya-independent imports
+        run: |
+          python - <<'PY'
+          import fk_ik_auto_matcher
+          from fk_ik_auto_matcher.matcher import MatchService
+          from fk_ik_auto_matcher.models import MatchSettings
+          from fk_ik_auto_matcher.resolver import RigResolver
+
+          assert fk_ik_auto_matcher.__version__
+          assert MatchService and MatchSettings and RigResolver
+          PY
