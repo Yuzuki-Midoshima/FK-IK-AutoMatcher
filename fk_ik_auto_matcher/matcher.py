@@ -10,7 +10,9 @@ from .models import MatchSettings
 
 class MatchService:
     _EPSILON = 1.0e-12
-    _STRAIGHT_TOLERANCE = 1.0e-4
+    # Treat bends shallower than about 0.6 degrees as straight. Tiny numerical
+    # bends are not reliable enough to choose a pole side.
+    _STRAIGHT_TOLERANCE = 1.0e-2
 
     def __init__(self, cmds_module=None):
         if cmds_module is None:
@@ -50,6 +52,10 @@ class MatchService:
             if length <= sqrt(line_sq) * self._STRAIGHT_TOLERANCE:
                 direction = self._straight_chain_direction(settings, projection, line)
                 length = sqrt(sum(value * value for value in direction))
+            else:
+                current = self._current_pole_direction(settings, projection, line)
+                if self._length_sq(current) > self._EPSILON and self._dot(direction, current) < 0.0:
+                    direction = tuple(-value for value in direction)
             position = tuple(
                 middle[i] + direction[i] / length * settings.pole_distance
                 + settings.pole_offset[i] for i in range(3)
@@ -66,6 +72,21 @@ class MatchService:
 
     def _straight_chain_direction(self, settings, projection, line):
         """Keep the current pole side, then fall back to the joint preferred angle."""
+        direction = self._current_pole_direction(settings, projection, line)
+        if self._length_sq(direction) > self._EPSILON:
+            return direction
+
+        direction = self._preferred_angle_direction(settings.middle_joint, line)
+        if self._length_sq(direction) > self._EPSILON:
+            return direction
+
+        axis = min(
+            ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+            key=lambda value: abs(self._dot(value, line)),
+        )
+        return self._cross(line, axis)
+
+    def _current_pole_direction(self, settings, projection, line):
         try:
             pole = tuple(self.cmds.xform(
                 settings.pole_controller, query=True, worldSpace=True, translation=True
@@ -78,16 +99,7 @@ class MatchService:
             )
             if self._length_sq(direction) > self._EPSILON:
                 return direction
-
-        direction = self._preferred_angle_direction(settings.middle_joint, line)
-        if self._length_sq(direction) > self._EPSILON:
-            return direction
-
-        axis = min(
-            ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
-            key=lambda value: abs(self._dot(value, line)),
-        )
-        return self._cross(line, axis)
+        return (0.0, 0.0, 0.0)
 
     def _preferred_angle_direction(self, joint, line):
         try:

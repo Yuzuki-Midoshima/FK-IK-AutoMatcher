@@ -5,9 +5,9 @@ from fk_ik_auto_matcher.models import MatchSettings
 
 
 class FakeCmds:
-    def __init__(self, pole=(5.0, 3.0, 0.0), preferred=(0.0, 0.0, 0.0)):
+    def __init__(self, pole=(5.0, 3.0, 0.0), preferred=(0.0, 0.0, 0.0), middle=(5.0, 0.0, 0.0)):
         self.positions = {
-            "start": (0.0, 0.0, 0.0), "middle": (5.0, 0.0, 0.0),
+            "start": (0.0, 0.0, 0.0), "middle": middle,
             "end": (10.0, 0.0, 0.0), "pole": pole,
         }
         self.preferred = dict(zip("XYZ", preferred))
@@ -48,6 +48,11 @@ def settings():
 
 
 class StraightChainTests(unittest.TestCase):
+    def test_bent_chain_keeps_current_pole_side(self):
+        cmds = FakeCmds(pole=(5.0, -3.0, 0.0), middle=(5.0, 1.0, 0.0))
+        MatchService(cmds).fk_to_ik(settings())
+        self.assertEqual(cmds.pole_result, (5.0, -3.0, 0.0))
+
     def test_keeps_current_pole_side_for_straight_chain(self):
         cmds = FakeCmds(pole=(5.0, -3.0, 0.0), preferred=(0.0, 0.0, 20.0))
         MatchService(cmds).fk_to_ik(settings())
