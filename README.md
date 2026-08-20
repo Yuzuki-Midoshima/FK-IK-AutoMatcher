@@ -42,6 +42,10 @@ from fk_ik_auto_matcher import show
 show()
 ```
 
+### Maya シェルフ
+
+Python のシェルフボタンを作成し、上記いずれかの起動コードを登録します。
+
 `reload_fk_ik_auto_matcher.py` は、Maya セッション中にパッケージを再読み込みするための開発用ヘルパーです。
 
 ## 使い方
