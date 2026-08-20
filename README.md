@@ -1,118 +1,522 @@
-# Maya用 FK/IK Auto Matcher
+# Maya FK/IK Auto Matcher
 
-FK と IK のコントロールを双方向に整合させる、Autodesk Maya 2026 用のポーズマッチングツールです。3 点のリムチェーンを扱うリガー、テクニカルアーティスト、テクニカルアニメーターを対象としています。
+A reusable FK/IK pose-matching tool for **Autodesk Maya 2026 / Python 3**.
 
-## デモ
+FK/IK切り替え時に発生するポーズのずれを抑え、IKへの切り替えではPole Vectorも自動的に再配置するマッチングツールです。
 
-デモ画像と動画は [`docs/media/`](docs/media/) に追加する予定です。ポートフォリオ用のメディアをこのディレクトリにまとめることで、Maya パッケージを変更せずにプレゼンテーションを更新できます。
+キャラクター **Diana** 用に制作したFK/IK Match Toolをベースに、キャラクター固有の命名やリグ構造への依存を減らし、異なる3点リムでも利用できるよう再設計しました。
 
-## 概要
+汎用化では単純にノード名を設定へ移すのではなく、**対象リグの解決、設定の検証、Pole Vectorのフォールバック**まで含めてワークフローを見直しています。
 
-FK/IK リグのノードを選択すると、ツールが関連するコントロールとジョイントを特定します。Rig Module Builder のマニフェストが利用できる場合は、そこからリグデータを読み取ります。利用できない場合は、シーン内の名前と接続情報を使用して慎重に検索します。各マッチング処理は、Maya の 1 つの Undo チャンクにまとめられます。
+---
 
-## 機能
+## Features
 
-- IK コントローラーとポールベクターコントローラーを配置し、FK から IK へマッチング
-- IK ジョイントの回転を FK コントローラーへ適用し、IK から FK へマッチング
-- ポールベクターの向きを安定して維持し、直線状のチェーンでは中間ジョイントの優先角度をフォールバックとして使用
-- `rigModuleBuilderManifest` ネットワークノードのアトリビュートからリグデータを解決
-- マニフェストがない場合に、名前空間とリムを考慮した慎重なシーン検索を実行
-- 解決されたノードと FK/IK 切り替え設定の手動修正に対応
-- マッチャー設定を JSON 形式で保存および読み込み
-- 各マッチングを Maya の 1 回の Undo 操作に集約
+* FK → IK / IK → FKの双方向マッチング
+* 3点リムに対応
+* IK End Controlの位置・回転を自動調整
+* Pole Vectorの自動計算・再配置
+* 選択ノードを起点としたリグ構造の解決
+* Rig Module Builder Manifestからのリグ情報取得
+* Manifestがない場合のScene Search
+* Match Settingsの確認・編集
+* 設定のJSON保存・再利用
+* 直線に近いリムに対するPole Vector Fallback
+* Missing / Ambiguous Nodeの検出
+* Expected Node Typeの検証
+* 1操作を1つのMaya Undo Chunkとして処理
+* Maya非依存のPole Vector計算をpytestでテスト
 
-## インストール
+---
 
-1. このリポジトリを、Maya からアクセスできる場所にダウンロードまたはクローンします。
-2. リポジトリのルートを Maya の Python パスへ追加するか、付属ランチャーをフルパスで実行します。
+## Why I Made This
 
-Maya の Python スクリプトエディタから実行する場合：
+最初のFK/IK Match Toolは、Dianaの腕リグ専用として制作しました。
 
-```python
-import runpy
+Diana版では対象となるJoint、Control、FKIK Switchがすべて既知だったため、
 
-runpy.run_path(r"<path-to-repository>/launch_fk_ik_auto_matcher.py")
+```text
+Known Diana Rig
+      ↓
+Match Controls
+      ↓
+Switch FK / IK
 ```
 
-リポジトリのルートがすでに `PYTHONPATH` に含まれている場合：
+というシンプルな処理で実装できます。
+
+しかし、別のリグへ適用する場合は、
+
+* ノード名
+* Namespace
+* Joint / Control構造
+* FKIK Switch
+* Pole Vectorの状態
+
+などが異なります。
+
+そこで汎用版では、マッチング処理の前に**「現在選択されているリグを解決する工程」**を追加しました。
+
+```text
+Selected Node
+      ↓
+Resolve Rig
+      ↓
+Validate Settings
+      ↓
+Match Controls
+      ↓
+Switch FK / IK
+```
+
+これにより、マッチングロジックとキャラクター固有の情報を分離しています。
+
+---
+
+# Workflow
+
+ツールの基本フローは以下です。
+
+```text
+Select Rig Node
+      │
+      ▼
+  Rig Resolver
+      │
+      ▼
+Manifest Available?
+   │           │
+  YES          NO
+   │           │
+   ▼           ▼
+Manifest     Scene
+  Data       Search
+   │           │
+   └─────┬─────┘
+         ▼
+   Match Settings
+         │
+         ▼
+      Validate
+         │
+         ▼
+    FK ↔ IK Match
+```
+
+Diana版では直接マッチングを開始していましたが、汎用版では**Resolve → Validate → Match**の3段階に分けています。
+
+---
+
+# Rig Resolution
+
+## Manifest Resolution
+
+Rig Module Builderによって生成されたリグでは、`rigModuleBuilderManifest` に保存された情報を優先して使用します。
+
+```text
+Selected Node
+      ↓
+Find Manifest
+      ↓
+Read Explicit Rig Data
+      ↓
+Build Match Settings
+```
+
+名前からリグ構造を推測するのではなく、生成時に記録された情報から対象ノードを取得することで、より明示的にリグを解決できます。
+
+---
+
+## Scene Resolution
+
+Manifestが存在しない場合は、選択されたノードを起点としてシーン内から候補を検索します。
+
+```text
+Selected Node
+      ↓
+Read Context
+      ↓
+Namespace / Side / Limb
+      ↓
+Search Candidates
+      ↓
+Validate
+      ↓
+Match Settings
+```
+
+候補が存在しない場合や、一意に特定できない場合は、不確実なノードを操作せずエラーとして停止します。
+
+---
+
+# Match Settings
+
+Resolverによって取得したリグ情報はMatch Settingsとしてまとめます。
+
+主に以下の情報を保持します。
+
+* FK Start / Mid / End Controls
+* IK Start / Mid / End Joints
+* IK End Control
+* Pole Vector Control
+* FKIK Switch
+* FK / IK Switch Values
+* Pole Vector Settings
+
+自動解析した結果は確認・修正でき、JSONとして保存して同じリグで再利用できます。
+
+```text
+Auto Resolve
+      ↓
+Match Settings
+      ↓
+Check / Edit
+      ↓
+Save JSON
+      ↓
+Reuse
+```
+
+自動解析だけに依存せず、必要に応じて人が修正できる構成にしています。
+
+---
+
+# FK → IK
+
+FKからIKへ切り替える場合は、現在のリムのポーズを基準にIK側を合わせます。
+
+```text
+Current FK Pose
+      ↓
+Match IK End Control
+      ↓
+Calculate Pole Vector
+      ↓
+Move Pole Control
+      ↓
+Switch to IK
+```
+
+まずIK End ControlのTransformを現在のEnd Jointへ合わせます。
+
+その後、Start / Mid / End JointからPole Vector位置を計算し、Pole Controlを移動します。
+
+すべてのマッチングが完了した後にFKIK SwitchをIKへ変更します。
+
+### Why Match Before Switch?
+
+単純にFKIK Switchだけを変更すると、切り替え先のControlが現在のポーズと一致していないため、ポーズが変化する可能性があります。
+
+```text
+Switch First
+
+FK Pose
+   ↓
+Switch
+   ↓
+Different IK Transform
+   ↓
+Pose Pop
+```
+
+そのため、
+
+```text
+Match First
+
+FK Pose
+   ↓
+Match IK Controls
+   ↓
+Switch
+   ↓
+Maintain Pose
+```
+
+の順番で処理します。
+
+---
+
+# IK → FK
+
+IKからFKへ切り替える場合は、現在のIK Chainを基準にFK Controlsを合わせます。
+
+```text
+Current IK Pose
+      ↓
+Match FK Start
+      ↓
+Match FK Mid
+      ↓
+Match FK End
+      ↓
+Switch to FK
+```
+
+Start → Mid → Endの順番で対応するFK Controlを現在のJoint Poseへ合わせます。
+
+すべてのマッチングが完了してからFKへ切り替えます。
+
+---
+
+# Pole Vector Calculation
+
+通常の状態では、3点のJoint位置から現在の曲げ方向を計算します。
+
+```text
+Start -------- Projection -------- End
+                     \
+                      \
+                      Mid
+                       ↑
+                  Bend Direction
+```
+
+Mid JointをStart → Endの直線へ射影し、
+
+```text
+BendVector = Mid - Projection
+```
+
+からリムの曲げ方向を取得します。
+
+正規化した方向をMid Jointから延長することでPole Vectorの基本位置を求めます。
+
+```text
+PolePosition =
+    Mid
+    + BendDirection × Distance
+```
+
+---
+
+# Straight Limb Fallback
+
+3点が完全、またはほぼ一直線の場合、Joint位置だけでは曲げ方向を一意に判断できません。
+
+```text
+Start -------- Mid -------- End
+
+Bend Direction = Undefined
+```
+
+異なるリグやポーズでも使用できるよう、Pole Vector方向を決定するためのフォールバックを追加しています。
+
+```text
+Joint Geometry
+      ↓
+Stable Direction?
+   ┌──────┴──────┐
+  YES            NO
+   ↓              ↓
+ Use          Current Pole
+Direction       Direction
+                  ↓
+                Valid?
+             ┌────┴────┐
+            YES        NO
+             ↓          ↓
+            Use     Preferred
+                     Angle
+```
+
+## 1. Joint Geometry
+
+まずStart / Mid / Endの位置から通常の曲げ方向を計算します。
+
+安定した方向が取得できる場合は、その結果を使用します。
+
+## 2. Current Pole Direction
+
+Jointがほぼ直線の場合、現在のPole Vector Controlの位置を利用します。
+
+既存のPoleがどちら側に配置されていたかを方向情報として利用することで、現在のリグ状態をできるだけ維持します。
+
+## 3. Preferred Angle
+
+Current Poleからも安定した方向を取得できない場合は、Jointの `preferredAngle` を利用してフォールバック方向を求めます。
+
+これにより、直線に近いリムでも可能な限り予測可能なマッチングを行います。
+
+---
+
+# Error Handling
+
+汎用化によって対象となるリグ構造が固定ではなくなるため、誤ったノードを操作しないことを重視しています。
+
+以下のような状態を検出します。
+
+* Required Nodeが存在しない
+* 同名候補が複数存在する
+* Expected Node Typeと一致しない
+* Match Settingsが不完全
+* FKIK Switchへ書き込めない
+* Pole Vector方向を安全に決定できない
+
+不確実な状態では処理を継続せず、問題の内容をエラーとして表示します。
+
+また、1回のマッチング処理は1つのMaya Undo Chunkとして実行します。
+
+---
+
+# Architecture
+
+汎用版では、Diana固有の実装から発展させる際に責務を分離しました。
+
+```text
+        UI
+        │
+        ▼
+     Resolver
+        │
+        ▼
+   Match Settings
+        │
+        ▼
+      Matcher
+        │
+        ▼
+   Math / Maya API
+```
+
+### UI
+
+ユーザー操作、設定表示、Match実行を担当します。
+
+### Resolver
+
+選択されたノードやManifestから対象リグを解決します。
+
+### Match Settings
+
+ResolverとMatcherの間で、マッチングに必要なリグ情報を保持します。
+
+### Matcher
+
+解決済みのリグ情報を使用してFK → IK / IK → FK処理を実行します。
+
+### Math
+
+Pole Vectorなどの数学処理を担当します。
+
+Maya Sceneへ直接依存しない計算を分離することで、Mayaを起動せずpytestから検証できるようにしています。
+
+---
+
+# From Diana-specific to General-purpose
+
+汎用版は、Diana版のノード名だけを変更したものではありません。
+
+```text
+Diana-specific FK/IK Matcher
+             │
+             ▼
+ Separate Rig-specific Data
+             │
+             ▼
+       Rig Resolver
+             │
+             ▼
+    Editable Settings
+             │
+             ▼
+ Pole Vector Fallback
+             │
+             ▼
+General-purpose FK/IK Auto Matcher
+```
+
+|                 | Diana Version              | General-purpose                           |
+| --------------- | -------------------------- | ----------------------------------------- |
+| Target          | Diana Arm                  | 3-point Limb                              |
+| Rig Structure   | Known                      | Resolved                                  |
+| Node Resolution | Fixed                      | Resolver                                  |
+| Manifest        | Not Required               | Supported                                 |
+| Settings        | Diana-specific             | Editable / JSON                           |
+| Straight Limb   | Stop                       | Fallback                                  |
+| Pole Direction  | Joint Geometry             | Geometry / Current Pole / Preferred Angle |
+| Goal            | Predictable Diana Workflow | Reusability                               |
+
+Diana版では、対象リグが既知であることを利用し、**シンプルで予測可能な処理**を優先しました。
+
+汎用版では対象リグが未知であることを前提として、
+
+**「どのリグを操作するかを解決する」
+→「安全に操作できるか検証する」
+→「マッチングする」**
+
+というワークフローへ変更しています。
+
+---
+
+# Installation
+
+CloneまたはDownloadしたRepositoryの `src` をPython Pathへ追加します。
+
+MayaのPython Script Editor：
 
 ```python
-from fk_ik_auto_matcher import show
+import sys
+import importlib
 
+project_src = r"C:\path\to\FK-IK-AutoMatcher\src"
+
+if project_src not in sys.path:
+    sys.path.insert(0, project_src)
+
+import fkik_match_tool.launcher
+importlib.reload(fkik_match_tool.launcher)
+
+fkik_match_tool.launcher.show()
+```
+
+または `src/fkik_match_tool` をMayaのユーザー `scripts` ディレクトリへ配置し、
+
+```python
+from fkik_match_tool.launcher import show
 show()
 ```
 
-`reload_fk_ik_auto_matcher.py` は、Maya セッション中にパッケージを再読み込みするための開発用ヘルパーです。
+で起動します。
 
-## 使い方
+---
 
-1. 対象の FK/IK リムに属するノードを 1 つ選択します。
-2. ツールを開き、選択したノードを検出基準として使用します。
-3. 解決されたコントロール、ジョイント、切り替えアトリビュート、ポールベクター設定を確認します。
-4. **FK to IK** または **IK to FK** を実行します。
-5. 自動検索がリグに適さない場合は、ノードを手動で入力し、必要に応じて設定を JSON として保存します。
+# Development
 
-## 技術的な特長
-
-- Maya への依存をサービス境界で注入し、コマンドモジュールのフェイクを使ってマッチングとリゾルバーのロジックをテスト可能
-- パッケージのエントリーポイントで Maya と PySide6 を遅延インポートし、UI 以外のモジュールを標準 Python 環境でもインポート可能
-- 不安定な軸付近の方向を正規化せず、曲がったチェーン、ほぼ直線のチェーン、直線のチェーンすべてに対応したポールベクター配置
-- 型付きデータクラスと UTF-8 の JSON シリアライズを使用した設定管理
-- 名前の推測よりも明示的なマニフェストデータを優先するリグ検索
-
-## プロジェクト構成
-
-```text
-fk_ik_auto_matcher/          Maya パッケージ
-  main.py                    Maya/PySide6 エントリーポイント
-  ui.py                      ユーザーインターフェース
-  matcher.py                 FK/IK マッチング処理
-  resolver.py                マニフェストとシーンの検索
-  models.py                  シリアライズ可能な設定モデル
-tests/                       Maya に依存しないユニットテスト
-docs/media/                  デモメディア用プレースホルダー
-launch_fk_ik_auto_matcher.py シェルフ向けランチャー
-reload_fk_ik_auto_matcher.py 開発用リロードヘルパー
+```shell
+python -m pip install -e .
+python -m pytest
 ```
 
-既存のフラットなパッケージ構成は意図的なものです。これにより、Maya でのインポートとランチャーのワークフローをシンプルに保っています。
+Pole Vector計算などのMaya非依存ロジックはMaya外でテストできます。
 
-## 動作要件
+Scene IntegrationについてはMaya 2026上で実際のリグを使用して確認します。
 
-- Autodesk Maya 2026
-- Python 3.11（Maya 2026 に同梱）
-- PySide6 および shiboken6（Maya 2026 に同梱）
+---
 
-このマッチャーは、3 点のリムチェーンにおける開始、中間、終了ノードを対象とします。カスタムストレッチやマトリックスネットワークの同期など、リグ固有のシステムは現在の対象外です。
+# Limitations
 
-## テスト
+* 現在は3点リムを対象としています
+* リグ構造によってはMatch Settingsの手動調整が必要です
+* Locked Channelや特殊なConstraint / Offset構造では追加対応が必要になる場合があります
+* Controlが要求されたTransformを受け取れることを前提としています
+* 独自性の高いリグではResolverによる完全な自動判定ができない場合があります
+* Maya Scene Fileは誤公開防止のためRepositoryでは除外しています
 
-### 自動テスト
+---
 
-自動テストスイートでは、フェイクの `maya.cmds` 境界を使用し、設定のシリアライズ、切り替えプラグの構築、リムコンテキストのフィルタリング、ポールベクターの動作を検証します。Maya は必要ありません。
+# Environment
 
-```bash
-python -m unittest discover -s tests -v
-```
+* Autodesk Maya 2026
+* Python 3
+* Maya Python API
+* PySide
+* pytest
 
-GitHub Actions では、追跡対象のすべての Python ファイルをコンパイルし、Maya に依存しないパッケージ部分のインポートも検証します。
+---
 
-### Maya 手動テスト
+# License
 
-以下の動作確認には、インストール済みの Maya と検証用の FK/IK リグが必要です。
+MIT License
 
-- PySide6 ウィンドウの起動と再表示
-- 実際の Maya ノードに対する、マニフェストベースおよびシーンベースの検索
-- 曲がったリムと直線状のリムにおける FK から IK、および IK から FK へのマッチング
-- ポールベクターの向きと優先角度によるフォールバック
-- FK/IK 切り替えの更新、選択コールバック、ボタン状態の更新
-- 各マッチング後に Maya で 1 回の Undo が可能であること
-- Maya のファイルダイアログを使用した JSON の保存と読み込み
-
-## 開発ワークフロー
-
-変更は `feature/*`、`fix/*`、または `chore/*` ブランチで作成し、`main` に対するプルリクエストを開いて、CI が成功した後にのみマージしてください。`main` は安定したポートフォリオ公開可能な状態に保ちます。
-
-## ライセンス
-
-[MIT License](LICENSE) のもとでライセンスされています。
+© 2026 Yuzuki Midoshima
