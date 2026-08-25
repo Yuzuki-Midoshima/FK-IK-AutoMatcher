@@ -30,8 +30,7 @@ class RigResolver:
 
     def _manifest_for(self, selected: str) -> dict | None:
         related = self._related_names(selected)
-        best = None
-        best_score = 0
+        matches = []
         for node in self.cmds.ls(type="network", long=True) or []:
             plug = f"{node}.{self.MANIFEST_ATTR}"
             if not self.cmds.objExists(plug):
@@ -53,9 +52,15 @@ class RigResolver:
                     owned.update(str(item).split(".", 1)[0] for item in value)
             score = sum(self._leaf(name) in {self._leaf(item) for item in owned}
                         for name in related)
-            if score > best_score:
-                best, best_score = payload, score
-        return best
+            if score > 0:
+                matches.append((score, node, payload))
+        if not matches:
+            return None
+        best_score = max(item[0] for item in matches)
+        best = [item for item in matches if item[0] == best_score]
+        if len(best) > 1:
+            self._raise_ambiguous("Manifest", [item[1] for item in best])
+        return best[0][2]
 
     def _from_manifest(self, payload: dict) -> MatchSettings:
         data = payload["module_data"]
@@ -90,7 +95,7 @@ class RigResolver:
         ik_joints = self._ordered(self._filter(joints, r"(^|_)IK(_|.*JNT)"))
         deform = self._best_deform_chain(joints)
         ik_controls = self._filter(transforms, r"(^|_)IK(_|.*CTRL)")
-        pole = self._first(transforms, r"(^|_)(PV|POLE)(_|$)")
+        pole = self._unique(transforms, r"(^|_)(PV|POLE)(_|$)", "Pole Controller")
         ik_controller = next((n for n in ik_controls if n != pole), "")
         switch_node, switch_attr = self._switch_control(transforms)
         if min(len(fk_controls), len(ik_joints), len(deform)) < 3:
@@ -121,13 +126,26 @@ class RigResolver:
                 chain.append(current)
             if len(chain) >= 3:
                 chains.append(chain)
-        return max(chains, key=len, default=[])
+        if not chains:
+            return []
+        maximum = max(map(len, chains))
+        longest = [chain for chain in chains if len(chain) == maximum]
+        if len(longest) > 1:
+            self._raise_ambiguous("Deform Chain", [chain[0] for chain in longest])
+        return longest[0]
 
     def _switch_control(self, transforms):
+        candidates = []
         for node in transforms:
             for attr in self.cmds.listAttr(node, keyable=True) or []:
                 if re.search(r"fk.?ik|ik.?fk", attr, re.I):
-                    return node, attr
+                    candidates.append((node, attr))
+        if len(candidates) > 1:
+            self._raise_ambiguous(
+                "FKIK Switch", [f"{node}.{attr}" for node, attr in candidates]
+            )
+        if candidates:
+            return candidates[0]
         return "", "FKIK"
 
     def _related_names(self, node):
@@ -144,6 +162,17 @@ class RigResolver:
 
     def _first(self, nodes, pattern):
         return next(iter(self._filter(nodes, pattern)), "")
+
+    def _unique(self, nodes, pattern, role):
+        candidates = self._filter(nodes, pattern)
+        if len(candidates) > 1:
+            self._raise_ambiguous(role, candidates)
+        return candidates[0] if candidates else ""
+
+    @staticmethod
+    def _raise_ambiguous(role, candidates):
+        listing = "\n".join(f"- {candidate}" for candidate in candidates)
+        raise ValueError(f"{role}を一意に解決できません。\n\nCandidates:\n{listing}")
 
     def _ordered(self, nodes):
         return sorted(nodes, key=lambda node: self._leaf(node).lower())

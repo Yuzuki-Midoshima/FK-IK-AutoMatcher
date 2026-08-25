@@ -23,14 +23,44 @@ class MatchService:
         self.cmds = cmds_module
 
     def validate(self, settings: MatchSettings, direction: str) -> list[str]:
-        required = (
-            settings.deform_joints + [settings.ik_controller, settings.pole_controller]
-            if direction == "fk_to_ik" else settings.fk_controllers + settings.ik_joints
-        ) + [settings.switch_controller]
-        issues = [f"ノードが見つかりません: {node or '(未設定)'}"
-                  for node in required if not node or not self.cmds.objExists(node)]
+        joint_roles = (
+            list(zip(("Deform Start Joint", "Deform Mid Joint", "Deform End Joint"),
+                     settings.deform_joints))
+            if direction == "fk_to_ik" else
+            list(zip(("IK Start Joint", "IK Mid Joint", "IK End Joint"),
+                     settings.ik_joints))
+        )
+        control_roles = (
+            [("IK End Control", settings.ik_controller),
+             ("Pole Controller", settings.pole_controller)]
+            if direction == "fk_to_ik" else
+            list(zip(("FK Start Control", "FK Mid Control", "FK End Control"),
+                     settings.fk_controllers))
+        )
+        control_roles.append(("FKIK Switch Control", settings.switch_controller))
+        issues = []
+        for role, node in joint_roles + control_roles:
+            if not node or not self.cmds.objExists(node):
+                issues.append(f"{role}が見つかりません: {node or '(未設定)'}")
+                continue
+            expected = "joint" if (role.endswith("Joint")) else "transform"
+            try:
+                actual = self.cmds.nodeType(node)
+            except (AttributeError, TypeError, RuntimeError):
+                actual = None
+            if actual is not None and actual != expected:
+                issues.append(f"{role}は{expected}ではありません: {node} ({actual})")
+
         if not settings.switch_plug or not self.cmds.objExists(settings.switch_plug):
-            issues.append("切替属性が見つかりません: " + settings.switch_plug)
+            issues.append("FKIK Switch Attributeが見つかりません: " +
+                          (settings.switch_plug or "(未設定)"))
+        else:
+            try:
+                settable = bool(self.cmds.getAttr(settings.switch_plug, settable=True))
+            except (AttributeError, TypeError, ValueError, RuntimeError):
+                settable = False
+            if not settable:
+                issues.append("FKIK Switchへ書き込めません: " + settings.switch_plug)
         return issues
 
     def fk_to_ik(self, settings: MatchSettings) -> None:

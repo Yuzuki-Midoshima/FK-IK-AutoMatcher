@@ -32,6 +32,23 @@ class MatchSettingsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "3要素"):
                 MatchSettings.load(path)
 
+    def test_switch_values_json_round_trip(self):
+        value = MatchSettings(fk_value=10.0, ik_value=20.0)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "settings.json"
+            value.save(path)
+            loaded = MatchSettings.load(path)
+        self.assertEqual(loaded.fk_value, 10.0)
+        self.assertEqual(loaded.ik_value, 20.0)
+
+    def test_legacy_json_uses_default_switch_values(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "settings.json"
+            path.write_text('{"start_joint": "start"}', encoding="utf-8")
+            loaded = MatchSettings.load(path)
+        self.assertEqual(loaded.fk_value, 0.0)
+        self.assertEqual(loaded.ik_value, 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

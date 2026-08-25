@@ -79,11 +79,21 @@ class MainWindow(QtWidgets.QDialog):
         setting_row = len(definitions)
         form.addWidget(QtWidgets.QLabel("切替属性"), setting_row, 0)
         form.addWidget(self.switch_attribute, setting_row, 1)
+        self.fk_value = QtWidgets.QDoubleSpinBox()
+        self.fk_value.setRange(-99999.0, 99999.0)
+        self.fk_value.setValue(0.0)
+        form.addWidget(QtWidgets.QLabel("FK Value"), setting_row + 1, 0)
+        form.addWidget(self.fk_value, setting_row + 1, 1)
+        self.ik_value = QtWidgets.QDoubleSpinBox()
+        self.ik_value.setRange(-99999.0, 99999.0)
+        self.ik_value.setValue(1.0)
+        form.addWidget(QtWidgets.QLabel("IK Value"), setting_row + 2, 0)
+        form.addWidget(self.ik_value, setting_row + 2, 1)
         self.pole_distance = QtWidgets.QDoubleSpinBox()
         self.pole_distance.setRange(-99999.0, 99999.0)
         self.pole_distance.setValue(5.0)
-        form.addWidget(QtWidgets.QLabel("Pole距離"), setting_row + 1, 0)
-        form.addWidget(self.pole_distance, setting_row + 1, 1)
+        form.addWidget(QtWidgets.QLabel("Pole距離"), setting_row + 3, 0)
+        form.addWidget(self.pole_distance, setting_row + 3, 1)
         self.pole_offsets = []
         offset_host = QtWidgets.QWidget()
         offset_layout = QtWidgets.QHBoxLayout(offset_host)
@@ -94,8 +104,8 @@ class MainWindow(QtWidgets.QDialog):
             self.pole_offsets.append(box)
             offset_layout.addWidget(QtWidgets.QLabel(axis))
             offset_layout.addWidget(box, 1)
-        form.addWidget(QtWidgets.QLabel("Poleオフセット"), setting_row + 2, 0)
-        form.addWidget(offset_host, setting_row + 2, 1)
+        form.addWidget(QtWidgets.QLabel("Poleオフセット"), setting_row + 4, 0)
+        form.addWidget(offset_host, setting_row + 4, 1)
         layout.addWidget(details, 1)
         details.setMaximumHeight(24)
         details.toggled.connect(
@@ -170,6 +180,8 @@ class MainWindow(QtWidgets.QDialog):
             fk_controllers=[self.edits[f"fk_{i}"].text().strip() for i in range(3)],
             ik_joints=[self.edits[f"ik_{i}"].text().strip() for i in range(3)],
             switch_attribute=self.switch_attribute.text().strip() or "FKIK",
+            fk_value=self.fk_value.value(),
+            ik_value=self.ik_value.value(),
             pole_distance=self.pole_distance.value(),
             pole_offset=tuple(box.value() for box in self.pole_offsets),
         )
@@ -183,6 +195,8 @@ class MainWindow(QtWidgets.QDialog):
         for index, value in enumerate(settings.ik_joints):
             self.edits[f"ik_{index}"].setText(value)
         self.switch_attribute.setText(settings.switch_attribute)
+        self.fk_value.setValue(settings.fk_value)
+        self.ik_value.setValue(settings.ik_value)
         self.pole_distance.setValue(settings.pole_distance)
         for box, value in zip(self.pole_offsets, settings.pole_offset):
             box.setValue(value)

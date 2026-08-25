@@ -1,5 +1,7 @@
 # Maya FK/IK Auto Matcher
 
+![FK/IK Auto Matcher UI](docs/media/fk-ik-auto-matcher-ui.png)
+
 A reusable FK/IK pose-matching tool for **Autodesk Maya 2026 / Python 3**.
 
 FK/IK切り替え時に発生するポーズのずれを抑え、IKへの切り替えではPole Vectorも自動的に再配置するマッチングツールです。
@@ -20,10 +22,12 @@ FK/IK切り替え時に発生するポーズのずれを抑え、IKへの切り�
 * Rig Module Builder Manifestからのリグ情報取得
 * Manifestがない場合のScene Search
 * Match Settingsの確認・編集
+* FK / IK Switch Valuesの編集
 * 設定のJSON保存・再利用
 * 直線に近いリムに対するPole Vector Fallback
-* Missing / Ambiguous Nodeの検出
-* Expected Node Typeの検証
+* Required Node / Attributeの検証
+* 解決不能なAmbiguous Candidateの検出
+* Joint / ControlのNode Type検証
 * 1操作を1つのMaya Undo Chunkとして処理
 * Maya非依存のPole Vector計算をpytestでテスト
 
@@ -125,6 +129,16 @@ Build Match Settings
 
 名前からリグ構造を推測するのではなく、生成時に記録された情報から対象ノードを取得することで、より明示的にリグを解決できます。
 
+### Manifest Compatibility
+
+現在のManifest Resolutionは、Rig Module Builderが生成する `rigModuleBuilderManifest` の想定Schemaを対象としています。
+
+実装が参照する主な情報は、ルートの `created_nodes`、`source_joints` と、`module_data` 内の `module_type`、`fk_joints`、`ik_joints`、`deform_joints`、`fk_controllers`、`pole_joint_index`、`blend_plug`、`ik_controller`、`pole_controller`、`settings_controller`、`pole_distance_multiplier` です。
+
+Manifestに記録されたModule情報、Deform Joint、FK Controller、IK Joint、IK / Pole Controller、FKIK SwitchなどからMatch Settingsを構築します。任意形式の `rigModuleBuilderManifest` JSONを読み取る汎用Manifest Parserではありません。
+
+Rig Module Builder側のManifest Schemaが変更された場合は、本ツール側でも互換性の確認が必要です。
+
 ---
 
 ## Scene Resolution
@@ -136,16 +150,22 @@ Selected Node
       ↓
 Read Context
       ↓
-Namespace / Side / Limb
+Namespace / Limb Context
       ↓
 Search Candidates
+      ↓
+Resolve
       ↓
 Validate
       ↓
 Match Settings
 ```
 
-候補が存在しない場合や、一意に特定できない場合は、不確実なノードを操作せずエラーとして停止します。
+ResolverはNamespace、選択ノードの名前、Limbを示す名前要素、Joint階層などを利用して候補を絞り込みます。
+
+十分な根拠から候補を決定できる場合は自動的にMatch Settingsを構築します。一方、同じ優先度の候補が複数残り、安全に対象を決定できない場合は、任意のノードを採用せずAmbiguous Resolutionとして停止します。
+
+Scene Searchは任意形式のリグ構造を完全に理解するものではありません。自動解決結果はMatch Settings上で確認でき、必要に応じて手動で修正してからMatchを実行できます。
 
 ---
 
@@ -155,15 +175,18 @@ Resolverによって取得したリグ情報はMatch Settingsとしてまとめ�
 
 主に以下の情報を保持します。
 
-* FK Start / Mid / End Controls
-* IK Start / Mid / End Joints
-* IK End Control
-* Pole Vector Control
-* FKIK Switch
-* FK / IK Switch Values
-* Pole Vector Settings
+- Deform Start / Mid / End Joints
+- FK Start / Mid / End Controls
+- IK Start / Mid / End Joints
+- IK End Control
+- Pole Vector Control
+- FKIK Switch
+- FK / IK Switch Values
+- Pole Vector Distance / Offset
 
-自動解析した結果は確認・修正でき、JSONとして保存して同じリグで再利用できます。
+自動解析された設定はUI上で確認・修正できます。FK / IK Switch Valuesも変更できるため、`FK = 0 / IK = 1` 以外の値を使用するリグでも明示的に設定できます。
+
+Match SettingsはJSONとして保存・読み込みでき、同じリグや同じ構造を持つリグで再利用できます。
 
 ```text
 Auto Resolve
@@ -174,10 +197,10 @@ Check / Edit
       ↓
 Save JSON
       ↓
-Reuse
+Load / Reuse
 ```
 
-自動解析だけに依存せず、必要に応じて人が修正できる構成にしています。
+JSONにはノード設定、Switch Values、Pole Vector Settingsなどが保存されます。自動解析だけに依存せず、Resolverによる自動化とユーザーによる明示的な設定を組み合わせられる構成にしています。
 
 ---
 
@@ -342,18 +365,20 @@ Current Poleからも安定した方向を取得できない場合は、Jointの
 
 # Error Handling
 
-汎用化によって対象となるリグ構造が固定ではなくなるため、誤ったノードを操作しないことを重視しています。
+汎用化によって対象となるリグ構造が固定ではなくなるため、Resolve時とMatch実行前に設定を検証します。
 
 以下のような状態を検出します。
 
-* Required Nodeが存在しない
-* 同名候補が複数存在する
-* Expected Node Typeと一致しない
-* Match Settingsが不完全
-* FKIK Switchへ書き込めない
-* Pole Vector方向を安全に決定できない
+- Required Nodeが存在しない
+- Resolverが候補を安全に一意決定できない
+- Jointとして必要なNodeのTypeが一致しない
+- Controlとして必要なNodeがTransformではない
+- Match Settingsが不完全
+- FKIK Switch Attributeが存在しない
+- FKIK Switchへ書き込めない
+- Pole Vector方向を安全に決定できない
 
-不確実な状態では処理を継続せず、問題の内容をエラーとして表示します。
+安全に処理を続行できない場合は、Scene変更を開始せずエラーとして停止します。Ambiguous Resolutionの場合は、候補Nodeも表示します。Resolveできない場合も、Match Settingsを手動で設定できます。
 
 また、1回のマッチング処理は1つのMaya Undo Chunkとして実行します。
 
@@ -451,67 +476,80 @@ Diana版では、対象リグが既知であることを利用し、**シンプ�
 
 # Installation
 
-CloneまたはDownloadしたRepositoryの `src` をPython Pathへ追加します。
+RepositoryをCloneまたはDownloadし、Repository RootをMayaから参照できる状態にします。
 
-MayaのPython Script Editor：
+```text
+FK-IK-AutoMatcher/
+├─ fk_ik_auto_matcher/
+├─ launch_fk_ik_auto_matcher.py
+├─ reload_fk_ik_auto_matcher.py
+└─ ...
+```
+
+MayaのPython Script Editorからは、以下のように起動できます。
 
 ```python
 import sys
-import importlib
+project_root = r"C:\path\to\FK-IK-AutoMatcher"
 
-project_src = r"C:\path\to\FK-IK-AutoMatcher\src"
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-if project_src not in sys.path:
-    sys.path.insert(0, project_src)
+from fk_ik_auto_matcher import show
 
-import fkik_match_tool.launcher
-importlib.reload(fkik_match_tool.launcher)
-
-fkik_match_tool.launcher.show()
+window = show()
 ```
 
-または `src/fkik_match_tool` をMayaのユーザー `scripts` ディレクトリへ配置し、
+`project_root` には、`fk_ik_auto_matcher` Packageが含まれているRepository Rootを指定します。
 
-```python
-from fkik_match_tool.launcher import show
-show()
-```
+Repositoryに含まれる `launch_fk_ik_auto_matcher.py` は、Repository RootをPython Pathへ追加して `fk_ik_auto_matcher.show()` を実行するランチャーです。
 
-で起動します。
+開発中にPackageを再読み込みする場合は `reload_fk_ik_auto_matcher.py` を使用できます。このScriptは読み込み済みのPackage Moduleをクリアし、再ImportしてUIを開き直します。
+
+本ツールはAutodesk Maya上での実行を前提としています。
 
 ---
 
 # Development
 
+本ツールはAutodesk Maya 2026のPython環境をRuntimeとして使用します。
+
+Maya Sceneに依存しないMatch Settings、Resolverの補助ロジック、Pole Vector計算などは、通常のPython環境からUnit Testできます。pytestは別途インストールしてください。
+
 ```shell
-python -m pip install -e .
+python -m pip install pytest
 python -m pytest
 ```
 
-Pole Vector計算などのMaya非依存ロジックはMaya外でテストできます。
+テストはRepository Rootから実行します。
 
-Scene IntegrationについてはMaya 2026上で実際のリグを使用して確認します。
+Maya Scene、Control Transform、Joint Type、FKIK Switch、Undo ChunkなどMaya APIへ依存するIntegration部分については、Autodesk Maya 2026上で確認します。
+
+PySide6、`maya.cmds`、`maya.OpenMayaUI`、shiboken6などのMaya固有RuntimeはMaya同梱環境を前提としており、通常の外部Python環境だけでUIを起動することは想定していません。
 
 ---
 
 # Limitations
 
-* 現在は3点リムを対象としています
-* リグ構造によってはMatch Settingsの手動調整が必要です
-* Locked Channelや特殊なConstraint / Offset構造では追加対応が必要になる場合があります
-* Controlが要求されたTransformを受け取れることを前提としています
-* 独自性の高いリグではResolverによる完全な自動判定ができない場合があります
-* Maya Scene Fileは誤公開防止のためRepositoryでは除外しています
+- 現在は3点リムを対象としています
+- Scene Searchは名前、Namespace、選択Context、Joint階層などを利用するヒューリスティックなResolverです
+- FK Control / IK Jointの3点選択には名前順も利用するため、独自性の高い命名やリグ構造では自動解決できない場合があります
+- 自動解決できない場合はMatch Settingsを手動で設定し、JSONとして再利用できます
+- Locked Channelや特殊なConstraint / Offset構造では追加対応が必要になる場合があります
+- Controlが要求されたTransformを受け取れることを前提としています
+- Manifest Resolutionは対応するRig Module BuilderのManifest Schemaを前提としています
+- Maya Scene Fileは誤公開防止のためRepositoryでは除外しています
 
 ---
 
 # Environment
 
-* Autodesk Maya 2026
-* Python 3
-* Maya Python API
-* PySide
-* pytest
+- Autodesk Maya 2026
+- Python 3.11
+- Maya Python API
+- PySide6
+- shiboken6
+- pytest（Maya非依存ロジックの開発テスト用）
 
 ---
 

@@ -28,8 +28,15 @@ class FakeCmds:
         if translation:
             self.pole_result = tuple(translation)
 
-    def getAttr(self, plug):
+    def getAttr(self, plug, settable=False):
+        if settable:
+            return True
         return self.preferred[plug[-1]]
+
+    def nodeType(self, node):
+        if node in {"start", "middle", "end", "ik1", "ik2", "ik3"}:
+            return "joint"
+        return "transform"
 
     def setAttr(self, *_args):
         pass
@@ -72,6 +79,30 @@ class StraightChainTests(unittest.TestCase):
         cmds = FakeCmds(pole=(5.0, 0.0, 0.0), preferred=(0.0, 0.0, -20.0))
         MatchService(cmds).fk_to_ik(settings())
         self.assertEqual(cmds.pole_result, (5.0, -4.0, 0.0))
+
+
+class ValidationTests(unittest.TestCase):
+    def test_rejects_wrong_joint_type(self):
+        cmds = FakeCmds()
+        cmds.nodeType = lambda node: "transform"
+        issues = MatchService(cmds).validate(settings(), "fk_to_ik")
+        self.assertTrue(any("Deform Mid Jointはjointではありません" in issue
+                            for issue in issues))
+
+    def test_rejects_wrong_controller_type(self):
+        cmds = FakeCmds()
+        original = cmds.nodeType
+        cmds.nodeType = lambda node: "nurbsCurve" if node == "pole" else original(node)
+        issues = MatchService(cmds).validate(settings(), "fk_to_ik")
+        self.assertTrue(any("Pole Controllerはtransformではありません" in issue
+                            for issue in issues))
+
+    def test_rejects_non_settable_switch(self):
+        cmds = FakeCmds()
+        original = cmds.getAttr
+        cmds.getAttr = lambda plug, settable=False: False if settable else original(plug)
+        issues = MatchService(cmds).validate(settings(), "fk_to_ik")
+        self.assertIn("FKIK Switchへ書き込めません: switch.FKIK", issues)
 
 
 if __name__ == "__main__":
