@@ -29,7 +29,7 @@ FK/IK切り替え時に発生するポーズのずれを抑え、IKへの切り�
 * 解決不能なAmbiguous Candidateの検出
 * Joint / ControlのNode Type検証
 * 1操作を1つのMaya Undo Chunkとして処理
-* Maya非依存のPole Vector計算をpytestでテスト
+* Maya非依存ロジックのUnit Testを用意
 
 ---
 
@@ -163,9 +163,11 @@ Match Settings
 
 ResolverはNamespace、選択ノードの名前、Limbを示す名前要素、Joint階層などを利用して候補を絞り込みます。
 
-十分な根拠から候補を決定できる場合は自動的にMatch Settingsを構築します。一方、同じ優先度の候補が複数残り、安全に対象を決定できない場合は、任意のノードを採用せずAmbiguous Resolutionとして停止します。
+Pole Controller、FKIK Switch、Deform Chain、Manifestなど、安全な選択に曖昧性が残る主要な項目では、同じ優先度の候補を一意に決定できない場合にAmbiguous Resolutionとして停止します。
 
-Scene Searchは任意形式のリグ構造を完全に理解するものではありません。自動解決結果はMatch Settings上で確認でき、必要に応じて手動で修正してからMatchを実行できます。
+一方、一部のControl / Joint候補については名前や候補順を利用したヒューリスティックな解決を行います。
+
+そのため、Scene Searchは任意形式のリグ構造を完全に理解するものではなく、自動解決結果はMatch Settings上で確認してから使用することを推奨します。
 
 ---
 
@@ -378,9 +380,11 @@ Current Poleからも安定した方向を取得できない場合は、Jointの
 - FKIK Switchへ書き込めない
 - Pole Vector方向を安全に決定できない
 
-安全に処理を続行できない場合は、Scene変更を開始せずエラーとして停止します。Ambiguous Resolutionの場合は、候補Nodeも表示します。Resolveできない場合も、Match Settingsを手動で設定できます。
+Match開始前のValidationで問題を検出した場合は、Scene変更を開始せずエラーとして停止します。Ambiguous Resolutionの場合は、候補Nodeも表示します。Resolveできない場合も、Match Settingsを手動で設定できます。
 
-また、1回のマッチング処理は1つのMaya Undo Chunkとして実行します。
+Match処理自体は1回のMaya Undo Chunkとして実行されます。
+
+実行途中に予期しないエラーが発生した場合、自動Rollbackは行いませんが、Maya Undoを使用してMatch開始前の状態へ戻すことができます。
 
 ---
 
@@ -514,7 +518,7 @@ Repositoryに含まれる `launch_fk_ik_auto_matcher.py` は、Repository Root�
 
 本ツールはAutodesk Maya 2026のPython環境をRuntimeとして使用します。
 
-Maya Sceneに依存しないMatch Settings、Resolverの補助ロジック、Pole Vector計算などは、通常のPython環境からUnit Testできます。pytestは別途インストールしてください。
+Maya Sceneに依存しないMatch Settings、Resolverの補助ロジック、Pole Vector計算などは、通常のPython環境からUnit Testできます。pytestは別途インストールして実行可能です。
 
 ```shell
 python -m pip install pytest
