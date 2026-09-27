@@ -1,0 +1,35 @@
+{
+  "start_joint": "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_skel_gr|zelda_V001_008_Bip001_skelDrive_gr|zelda_V001_008_gr_Bip001_bendyArmBns_L|zelda_V001_008_bendy_Bip001_UpperArmA_L",
+  "middle_joint": "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_skel_gr|zelda_V001_008_Bip001_skelDrive_gr|zelda_V001_008_gr_Bip001_bendyArmBns_L|zelda_V001_008_bendy_Bip001_ForearmA_L",
+  "end_joint": "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_skel_gr|zelda_V001_008_Bip001_Root|zelda_V001_008_Bip001_Pelvis|zelda_V001_008_Bip001_Spine|zelda_V001_008_Bip001_Spine1|zelda_V001_008_Bip001_Spine2|zelda_V001_008_Bip001_Spine3|zelda_V001_008_Bip001_Clavicle_L|zelda_V001_008_Bip001_UpperArm_L|zelda_V001_008_Bip001_UpperArm1_L|zelda_V001_008_Bip001_UpperArm2_L|zelda_V001_008_Bip001_UpperArm3_L|zelda_V001_008_Bip001_Forearm_L|zelda_V001_008_Bip001_Forearm1_L|zelda_V001_008_Bip001_Forearm2_L|zelda_V001_008_Bip001_Forearm3_L|zelda_V001_008_Bip001_Hand_L",
+  "ik_controller": "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_core_gr|zelda_V001_008_Bip001_controls_gr|zelda_V001_008_Bip001_controls_ik_arm_grp|zelda_V001_008_anchor_IKArm_L|zelda_V001_008_adj_zero_CN_Bip001_ik_Hand_L|zelda_V001_008_adj_CN_Bip001_ik_Hand_L|zelda_V001_008_CN_Bip001_ik_Hand_L",
+  "pole_controller": "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_core_gr|zelda_V001_008_Bip001_controls_gr|zelda_V001_008_Bip001_controls_ik_arm_grp|zelda_V001_008_anchor_IKArm_L|zelda_V001_008_adj_CN_Bip001_pv_Arm_L|zelda_V001_008_CN_Bip001_pv_Arm_L",
+  "switch_controller": "zelda_V001_008_CN_Bip001_ArmSettings_L",
+  "fk_controllers": [
+    "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_core_gr|zelda_V001_008_Bip001_controls_gr|zelda_V001_008_anchor_Bip001_spine2|zelda_V001_008_adj_CN_Bip001_Clavicle_L|zelda_V001_008_CN_Bip001_Clavicle_L|zelda_V001_008_offset_CN_Bip001_fk_UpperArm_L|zelda_V001_008_adj_CN_Bip001_fk_UpperArm_L|zelda_V001_008_CN_Bip001_fk_UpperArm_L",
+    "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_core_gr|zelda_V001_008_Bip001_controls_gr|zelda_V001_008_anchor_Bip001_spine2|zelda_V001_008_adj_CN_Bip001_Clavicle_L|zelda_V001_008_CN_Bip001_Clavicle_L|zelda_V001_008_offset_CN_Bip001_fk_UpperArm_L|zelda_V001_008_offset_CN_Bip001_fk_Forearm_L|zelda_V001_008_adj_CN_Bip001_fk_Forearm_L|zelda_V001_008_CN_Bip001_fk_Forearm_L",
+    "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_core_gr|zelda_V001_008_Bip001_controls_gr|zelda_V001_008_anchor_Bip001_spine2|zelda_V001_008_adj_CN_Bip001_Clavicle_L|zelda_V001_008_CN_Bip001_Clavicle_L|zelda_V001_008_offset_CN_Bip001_fk_UpperArm_L|zelda_V001_008_offset_CN_Bip001_fk_Forearm_L|zelda_V001_008_adj_CN_Bip001_fk_Forearm_L|zelda_V001_008_offset_CN_Bip001_fk_Hand_L|zelda_V001_008_adj_CN_Bip001_fk_Hand_L|zelda_V001_008_CN_Bip001_fk_Hand_L"
+  ],
+  "ik_joints": [
+    "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_skel_gr|zelda_V001_008_Bip001_skelDrive_gr|zelda_V001_008_ik_Bip001_Clavicle_L|zelda_V001_008_ik_Bip001_UpperArm_L",
+    "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_skel_gr|zelda_V001_008_Bip001_skelDrive_gr|zelda_V001_008_ik_Bip001_Clavicle_L|zelda_V001_008_ik_Bip001_UpperArm_L|zelda_V001_008_ik_Bip001_Forearm_L",
+    "|zelda_V001_008_Bip001_rig_gr|zelda_V001_008_Bip001_globalMove_gr|zelda_V001_008_Bip001_skel_gr|zelda_V001_008_Bip001_skelDrive_gr|zelda_V001_008_ik_Bip001_Clavicle_L|zelda_V001_008_ik_Bip001_UpperArm_L|zelda_V001_008_ik_Bip001_Forearm_L|zelda_V001_008_ik_Bip001_Hand_L"
+  ],
+  "switch_attribute": "fkIk",
+  "fk_value": 0.0,
+  "ik_value": 1.0,
+  "pole_distance": 5.0,
+  "pole_offset": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "source": "manual",
+  "fk_joints": [
+    "",
+    "",
+    ""
+  ],
+  "resolution_methods": {},
+  "resolution_confidence": {}
+}

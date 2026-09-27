@@ -23,6 +23,11 @@ class MatchSettings:
     pole_distance: float = 5.0
     pole_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
     source: str = "manual"
+    fk_joints: list[str] = field(default_factory=lambda: ["", "", ""])
+    resolution_methods: dict[str, str] = field(default_factory=dict)
+    resolution_confidence: dict[str, str] = field(default_factory=dict)
+    resolution_errors: dict[str, str] = field(default_factory=dict)
+    debug_log: list[str] = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, indent=2)

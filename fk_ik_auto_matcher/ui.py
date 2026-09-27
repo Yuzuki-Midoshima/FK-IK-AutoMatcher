@@ -7,6 +7,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from .matcher import MatchService
 from .models import MatchSettings
 from .resolver import RigResolver
+from .settings_store import MatchSettingsStore
 
 
 class MainWindow(QtWidgets.QDialog):
@@ -15,12 +16,15 @@ class MainWindow(QtWidgets.QDialog):
         self.setObjectName("FKIKAutoMatcherWindow")
         self.setWindowTitle("FK-IK AutoMatcher 1.0.0")
         self.resize(590, 470)
+        self.setMinimumSize(590, 470)
+        self.setSizeGripEnabled(True)
         self.cmds = cmds_module
         if self.cmds is None:
             import maya.cmds as cmds_module
             self.cmds = cmds_module
         self.resolver = RigResolver(self.cmds)
         self.matcher = MatchService(self.cmds)
+        self.settings_store = MatchSettingsStore()
         self._selection_job = None
         self._switch_job = None
         self._build_ui()
@@ -32,8 +36,8 @@ class MainWindow(QtWidgets.QDialog):
         layout.setSpacing(8)
         auto = QtWidgets.QGroupBox("1. 自動設定")
         auto.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Preferred,
-            QtWidgets.QSizePolicy.Policy.Maximum,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
         )
         auto_layout = QtWidgets.QGridLayout(auto)
         self.reference = QtWidgets.QLineEdit()
@@ -46,17 +50,41 @@ class MainWindow(QtWidgets.QDialog):
         auto_layout.addWidget(self.reference, 0, 1)
         auto_layout.addWidget(get_selected, 0, 2)
         auto_layout.addWidget(detect, 1, 0, 1, 3)
-        self.status = QtWidgets.QLabel("未解析")
-        self.status.setWordWrap(True)
-        self.status.setFixedHeight(120)
+        self.status = QtWidgets.QPlainTextEdit("未解析")
+        self.status.setReadOnly(True)
+        self.status.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
+        self.status.setMinimumHeight(120)
+        self.status.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+        )
         self.status.setStyleSheet("padding:5px; background:#333; border:1px solid #555;")
         auto_layout.addWidget(self.status, 2, 0, 1, 3)
-        layout.addWidget(auto)
 
         details = QtWidgets.QGroupBox("2. 解析結果・詳細設定")
         details.setCheckable(True)
         details.setChecked(False)
-        form = QtWidgets.QGridLayout(details)
+        details_layout = QtWidgets.QVBoxLayout(details)
+        details_layout.setContentsMargins(6, 6, 6, 6)
+        details_scroll = QtWidgets.QScrollArea()
+        details_scroll.setWidgetResizable(True)
+        details_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        details_scroll.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        details_scroll.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        details_scroll.setSizeAdjustPolicy(
+            QtWidgets.QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored
+        )
+        details_scroll.setMinimumHeight(160)
+        details_content = QtWidgets.QWidget()
+        form = QtWidgets.QGridLayout(details_content)
+        form.setContentsMargins(4, 4, 4, 4)
+        details_scroll.setWidget(details_content)
+        details_layout.addWidget(details_scroll)
+        self.details_scroll = details_scroll
         definitions = (
             ("start_joint", "Deform 始点"), ("middle_joint", "Deform 中間"),
             ("end_joint", "Deform 終点"), ("ik_controller", "IK Controller"),
@@ -106,11 +134,19 @@ class MainWindow(QtWidgets.QDialog):
             offset_layout.addWidget(box, 1)
         form.addWidget(QtWidgets.QLabel("Poleオフセット"), setting_row + 4, 0)
         form.addWidget(offset_host, setting_row + 4, 1)
-        layout.addWidget(details, 1)
         details.setMaximumHeight(24)
-        details.toggled.connect(
-            lambda checked: details.setMaximumHeight(16777215 if checked else 24)
-        )
+        details.toggled.connect(lambda checked: self._toggle_details(details, checked))
+
+        content_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        content_splitter.setChildrenCollapsible(False)
+        content_splitter.setHandleWidth(7)
+        content_splitter.addWidget(auto)
+        content_splitter.addWidget(details)
+        content_splitter.setStretchFactor(0, 1)
+        content_splitter.setStretchFactor(1, 2)
+        content_splitter.setSizes([260, 24])
+        layout.addWidget(content_splitter, 1)
+        self.content_splitter = content_splitter
 
         actions = QtWidgets.QGroupBox("3. マッチ実行")
         actions.setSizePolicy(
@@ -148,11 +184,35 @@ class MainWindow(QtWidgets.QDialog):
         layout.addWidget(actions, 0)
         self._set_action_state()
 
+    def _toggle_details(self, details, checked):
+        """Let details use available height while keeping actions visible."""
+        details.setMaximumHeight(16777215 if checked else 24)
+        details.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            (QtWidgets.QSizePolicy.Policy.Expanding if checked else
+             QtWidgets.QSizePolicy.Policy.Fixed),
+        )
+        self.details_scroll.setVisible(checked)
+        if checked:
+            available = max(self.content_splitter.height(), 360)
+            self.content_splitter.setSizes([
+                max(150, available // 3),
+                max(210, available * 2 // 3),
+            ])
+        else:
+            self.content_splitter.setSizes([
+                max(self.content_splitter.height() - 24, 200), 24
+            ])
+        self.layout().invalidate()
+
     def _get_reference(self):
         selected = self.cmds.ls(selection=True, long=True) or []
         if selected:
             self.reference.setText(selected[0])
-            self._detect()
+            self.status.setPlainText("未解析")
+            self.status.setStyleSheet(
+                "padding:5px; background:#333; border:1px solid #555;"
+            )
 
     def _set_selected(self, edit):
         selected = self.cmds.ls(selection=True, long=True) or []
@@ -163,11 +223,51 @@ class MainWindow(QtWidgets.QDialog):
         try:
             settings = self.resolver.resolve(self.reference.text().strip())
             self._show_settings(settings)
-            self.status.setText("解析完了: " + settings.source)
+            self.status.setPlainText(self._resolution_report(settings))
             self.status.setStyleSheet("padding:5px; background:#29443d; border:1px solid #3c8878;")
         except Exception as error:
-            self.status.setText("解析失敗: " + str(error))
+            self.status.setPlainText("解析失敗: " + str(error))
             self.status.setStyleSheet("padding:5px; background:#4a3434; border:1px solid #8b5555;")
+
+    @staticmethod
+    def _resolution_report(settings):
+        lines = ["解析完了: " + settings.source]
+        entries = [
+            ("IK End Controller", settings.ik_controller, "ik_controller"),
+            ("Pole Controller", settings.pole_controller, "pole_controller"),
+        ]
+        positions = ("Start", "Mid", "End")
+        entries.extend(
+            (f"FK {position} Controller", node, "fk_controllers")
+            for position, node in zip(positions, settings.fk_controllers)
+        )
+        entries.extend(
+            (f"FK {position} Joint", node, "fk_joints")
+            for position, node in zip(positions, settings.fk_joints)
+            if node
+        )
+        entries.extend(
+            (f"IK {position} Joint", node, "ik_joints")
+            for position, node in zip(positions, settings.ik_joints)
+        )
+        entries.append(("FKIK Switch", settings.switch_plug, "switch_plug"))
+        for label, value, key in entries:
+            method = settings.resolution_methods.get(key)
+            if not method or not value:
+                continue
+            confidence = settings.resolution_confidence.get(key, "")
+            suffix = f" (Confidence: {confidence})" if confidence else ""
+            lines.extend((label, value, f"Resolved by: {method}{suffix}"))
+        if settings.resolution_errors:
+            lines.append("\n未解決項目:")
+            lines.extend(
+                f"- {key}: {message}"
+                for key, message in sorted(settings.resolution_errors.items())
+            )
+        if settings.debug_log:
+            lines.append("\nDebug Log:")
+            lines.extend(settings.debug_log)
+        return "\n".join(lines)
 
     def _settings(self):
         return MatchSettings(
@@ -306,11 +406,34 @@ class MainWindow(QtWidgets.QDialog):
     def _match(self, direction):
         try:
             settings = self._settings()
+            configured_nodes = (
+                settings.deform_joints + settings.fk_controllers + settings.ik_joints +
+                [settings.ik_controller, settings.pole_controller,
+                 settings.switch_controller]
+            )
+            if not any(configured_nodes):
+                reference = self.reference.text().strip()
+                if not reference:
+                    selected = self.cmds.ls(selection=True, long=True) or []
+                    reference = selected[0] if selected else ""
+                    if reference:
+                        self.reference.setText(reference)
+                settings = self.resolver.resolve(reference)
+                self._show_settings(settings)
             getattr(self.matcher, direction)(settings)
-            self.status.setText("マッチ完了。Maya Undoで1回で戻せます。")
+            message = "マッチ完了。Maya Undoで1回で戻せます。"
+            if self.matcher.last_debug_log:
+                message += "\n\n" + "\n".join(self.matcher.last_debug_log)
+            self.status.setPlainText(message)
+            self.status.setStyleSheet(
+                "padding:5px; background:#29443d; border:1px solid #3c8878;"
+            )
             self._set_action_state(settings)
         except Exception as error:
-            QtWidgets.QMessageBox.warning(self, "FK-IK AutoMatcher", str(error))
+            self.status.setPlainText("マッチ失敗: " + str(error))
+            self.status.setStyleSheet(
+                "padding:5px; background:#4a3434; border:1px solid #8b5555;"
+            )
 
     def _validate(self):
         settings = self._settings()
@@ -320,11 +443,48 @@ class MainWindow(QtWidgets.QDialog):
         QtWidgets.QMessageBox.information(self, "設定検証", message)
 
     def _save(self):
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "設定保存", "fkik_match.json", "JSON (*.json)")
-        if path:
-            self._settings().save(path)
+        try:
+            self.settings_store.prepare_directory()
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "設定保存",
+                str(self.settings_store.path),
+                "JSON (*.json)",
+            )
+            if not path:
+                return
+            path = self.settings_store.save(self._settings(), path)
+            self.status.setPlainText(f"設定を保存しました:\n{path}")
+            self.status.setStyleSheet(
+                "padding:5px; background:#29443d; border:1px solid #3c8878;"
+            )
+        except (OSError, ValueError) as error:
+            self.status.setPlainText("設定保存失敗: " + str(error))
+            self.status.setStyleSheet(
+                "padding:5px; background:#4a3434; border:1px solid #8b5555;"
+            )
 
     def _load(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "設定読込", "", "JSON (*.json)")
-        if path:
-            self._show_settings(MatchSettings.load(path))
+        try:
+            directory = self.settings_store.prepare_directory()
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self,
+                "設定読込",
+                str(directory),
+                "JSON (*.json)",
+            )
+            if not path:
+                return
+            settings = self.settings_store.load(path)
+            self._show_settings(settings)
+            self.status.setPlainText(
+                f"設定を読み込みました:\n{path}"
+            )
+            self.status.setStyleSheet(
+                "padding:5px; background:#29443d; border:1px solid #3c8878;"
+            )
+        except (OSError, ValueError, TypeError) as error:
+            self.status.setPlainText("設定読込失敗: " + str(error))
+            self.status.setStyleSheet(
+                "padding:5px; background:#4a3434; border:1px solid #8b5555;"
+            )
