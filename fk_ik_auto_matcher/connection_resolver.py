@@ -111,9 +111,10 @@ class ConnectionResolver:
             ik_controller=ik_controller,
             pole_controller=pole,
             switch_controller=switch_node,
-            fk_controllers=self._three_or_empty(fk_controllers),
-            fk_joints=self._three_or_empty(fk_joints),
-            ik_joints=self._three_or_empty(ik_joints),
+            fk_controllers=list(fk_controllers),
+            fk_joints=list(fk_joints),
+            ik_joints=list(ik_joints),
+            deform_chain=list(pose_chain),
             switch_attribute=switch_attr or "FKIK",
             source=("Connection-based Resolution" if complete else
                     "Connection-based Resolution (Partial)"),
@@ -268,7 +269,7 @@ class ConnectionResolver:
         if connected:
             return connected
 
-        chains = self._mapped_joint_chains(mappings, len(self._three(ik_joints)))
+        chains = self._mapped_joint_chains(mappings, len(ik_joints))
         if not chains:
             return [], [], []
         scores = []
@@ -285,14 +286,14 @@ class ConnectionResolver:
         return chain, controls, []
 
     def _fk_chain_from_ik_connections(self, ik_joints, controller_mappings):
-        """Resolve the three FK pairs through the blend constraints used by IK."""
+        """Resolve every FK pair through the blend constraints used by IK."""
         resolved = []
         all_constraints = []
         for constraint_type in self.FK_CONSTRAINT_TYPES:
             all_constraints.extend(self._ls(type=constraint_type))
         all_constraints = self._long_names(self._unique_nodes(all_constraints))
 
-        for ik_joint in self._three(ik_joints):
+        for ik_joint in ik_joints:
             candidates = []
             for constraint in all_constraints:
                 targets = self._constraint_targets(constraint)
@@ -352,7 +353,10 @@ class ConnectionResolver:
         fk_joints = [joint for joint, _control, _deform in resolved]
         controls = [control for _joint, control, _deform in resolved]
         deform = [deform for _joint, _control, deform in resolved]
-        if len(set(fk_joints)) != 3 or len(set(controls)) != 3 or len(set(deform)) != 3:
+        expected = len(ik_joints)
+        if (len(set(fk_joints)) != expected or
+                len(set(controls)) != expected or
+                len(set(deform)) != expected):
             return None
         return fk_joints, controls, deform
 
@@ -384,7 +388,7 @@ class ConnectionResolver:
 
     def _deform_chain(self, ik_joints, fk_joints):
         result = []
-        for ik_joint, fk_joint in zip(self._three(ik_joints), self._three(fk_joints)):
+        for ik_joint, fk_joint in zip(ik_joints, fk_joints):
             candidates = []
             for constraint_type in self.FK_CONSTRAINT_TYPES:
                 for constraint in self._connections(
@@ -400,7 +404,7 @@ class ConnectionResolver:
             if len(candidates) != 1:
                 return []
             result.append(candidates[0])
-        return result if len(set(result)) == 3 else []
+        return result if len(set(result)) == len(ik_joints) else []
 
     def _shared_switch(self, controls, extra_nodes):
         reach = defaultdict(set)

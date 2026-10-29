@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from math import sqrt
+import re
 
 from .models import MatchSettings
 
@@ -27,35 +28,49 @@ class MatchService:
         self.last_debug_log = []
 
     def validate(self, settings: MatchSettings, direction: str) -> list[str]:
-        if direction == "fk_to_ik" and settings.deform_joints == settings.fk_controllers:
-            joint_roles = list(zip(
-                ("FK Pose Start Control", "FK Pose Mid Control", "FK Pose End Control"),
-                settings.deform_joints,
-            ))
+        pose_chain = settings.deform_joints
+        legacy_positions = ("Start", "Mid", "End")
+        if direction == "fk_to_ik" and pose_chain == settings.fk_controllers:
+            joint_roles = [
+                ((f"FK Pose {legacy_positions[index]} Control" if len(pose_chain) == 3
+                  else f"FK Pose Control {index + 1}"), node)
+                for index, node in enumerate(pose_chain)
+            ]
         elif direction == "fk_to_ik":
-            joint_roles = list(zip(
-                ("Deform Start Joint", "Deform Mid Joint", "Deform End Joint"),
-                settings.deform_joints,
-            ))
+            joint_roles = [
+                ((f"Deform {legacy_positions[index]} Joint" if len(pose_chain) == 3
+                  else f"Deform Joint {index + 1}"), node)
+                for index, node in enumerate(pose_chain)
+            ]
         else:
-            joint_roles = list(zip(
-                ("IK Start Joint", "IK Mid Joint", "IK End Joint"),
-                settings.ik_joints,
-            ))
+            joint_roles = [
+                ((f"IK {legacy_positions[index]} Joint" if len(settings.ik_joints) == 3
+                  else f"IK Joint {index + 1}"), node)
+                for index, node in enumerate(settings.ik_joints)
+            ]
         control_roles = (
             [("IK End Control", settings.ik_controller),
              ("Pole Controller", settings.pole_controller)]
             if direction == "fk_to_ik" else
-            list(zip(("FK Start Control", "FK Mid Control", "FK End Control"),
-                     settings.fk_controllers))
+            [(f"FK Control {index + 1}", node)
+             for index, node in enumerate(settings.fk_controllers)]
         )
         control_roles.append(("FKIK Switch Control", settings.switch_controller))
         issues = []
+        if len(pose_chain) < 3:
+            issues.append("Pose chain requires at least 3 nodes.")
+        if len(settings.fk_controllers) < 3:
+            issues.append("FK chain requires at least 3 controls.")
+        if len(settings.ik_joints) < 3:
+            issues.append("IK chain requires at least 3 joints.")
         for role, node in joint_roles + control_roles:
             if not node or not self.cmds.objExists(node):
                 issues.append(f"{role}が見つかりません: {node or '(未設定)'}")
                 continue
-            expected = "joint" if (role.endswith("Joint")) else "transform"
+            expected = "joint" if (
+                role.startswith(("Deform Joint", "IK Joint")) or
+                (role.startswith(("Deform ", "IK ")) and role.endswith("Joint"))
+            ) else "transform"
             allowed = {expected}
             if role.endswith(("Control", "Controller")):
                 allowed.add("joint")
@@ -90,17 +105,26 @@ class MatchService:
             points = [tuple(self.cmds.xform(
                 node, query=True, worldSpace=True, translation=True
             )) for node in settings.deform_joints]
-            start, middle, end = points
+            start, end = points[0], points[-1]
             line = tuple(end[i] - start[i] for i in range(3))
             line_sq = sum(value * value for value in line)
             if line_sq <= self._EPSILON:
                 raise ValueError("始点と終点が同じ位置です。")
-            factor = sum((middle[i] - start[i]) * line[i] for i in range(3)) / line_sq
-            projection = tuple(start[i] + line[i] * factor for i in range(3))
-            direction = tuple(middle[i] - projection[i] for i in range(3))
+            bend = []
+            for index, point in enumerate(points[1:-1], 1):
+                factor = sum((point[i] - start[i]) * line[i] for i in range(3)) / line_sq
+                projection = tuple(start[i] + line[i] * factor for i in range(3))
+                direction = tuple(point[i] - projection[i] for i in range(3))
+                bend.append((self._length_sq(direction), index, point, projection, direction))
+            _strength, bend_index, middle, projection, direction = max(bend)
+            self.last_debug_log.append(
+                f"Pole bend joint: {settings.deform_joints[bend_index]} ({bend_index + 1}/{len(points)})"
+            )
             length = sqrt(sum(value * value for value in direction))
             if length <= sqrt(line_sq) * self._STRAIGHT_TOLERANCE:
-                direction = self._straight_chain_direction(settings, projection, line)
+                direction = self._straight_chain_direction(
+                    settings, projection, line, settings.deform_joints[bend_index]
+                )
                 length = sqrt(sum(value * value for value in direction))
             else:
                 current = self._current_pole_direction(settings, projection, line)
@@ -145,7 +169,16 @@ class MatchService:
             pose_matrices = self._capture_stage(
                 "1. Switch変更前 (IK Pose)", settings
             )
-            for controller, joint in zip(settings.fk_controllers, settings.ik_joints):
+            aligned_ik = self._aligned_chain(
+                settings.ik_joints, settings.fk_controllers
+            )
+            self.last_debug_log.append(
+                "IK/FK alignment: " + ", ".join(
+                    f"{controller} <- {joint}"
+                    for controller, joint in zip(settings.fk_controllers, aligned_ik)
+                )
+            )
+            for controller, joint in zip(settings.fk_controllers, aligned_ik):
                 self.cmds.matchTransform(controller, joint, position=False, rotation=True)
             self._capture_stage("2. FK Controller Match直後", settings, pose_matrices)
             self.cmds.setAttr(settings.switch_plug, settings.fk_value)
@@ -157,10 +190,13 @@ class MatchService:
         """Record world transforms without changing the evaluated rig."""
         self.last_debug_log.append(label)
         matrices = []
-        roles = ("Start", "Mid", "End")
-        for role, pose, control in zip(
-            roles, settings.deform_joints, settings.fk_controllers
-        ):
+        aligned_pose = self._aligned_chain(
+            settings.deform_joints, settings.fk_controllers
+        )
+        for index, (pose, control) in enumerate(zip(
+            aligned_pose, settings.fk_controllers
+        ), 1):
+            role = f"Joint {index}"
             pose_matrix = self._world_matrix(pose)
             control_matrix = self._world_matrix(control)
             matrices.append(pose_matrix)
@@ -178,7 +214,7 @@ class MatchService:
 
     def _correct_driven_pose(self, settings, targets):
         """Solve FK controls from their evaluated driven joints, not node names."""
-        if len(targets) != 3 or not all(targets):
+        if len(targets) != len(settings.fk_controllers) or not all(targets):
             self.last_debug_log.append("Driven Pose correction: skipped (pose matrix unavailable)")
             return
         try:
@@ -191,8 +227,11 @@ class MatchService:
         rejected = set()
         for iteration in range(20):
             maximum = 0.0
+            aligned_pose = self._aligned_chain(
+                settings.deform_joints, settings.fk_controllers
+            )
             for control, driven, target_values in zip(
-                settings.fk_controllers, settings.deform_joints, targets
+                settings.fk_controllers, aligned_pose, targets
             ):
                 actual_values = self._world_matrix(driven)
                 control_values = self._world_matrix(control)
@@ -287,6 +326,64 @@ class MatchService:
     def _format_values(values):
         return "[" + ", ".join(f"{float(value):.8g}" for value in values) + "]"
 
+    _ALIGNMENT_GENERIC_PARTS = {
+        "fk", "ik", "rig", "drv", "jnt", "joint", "anim", "ctrl",
+        "control", "ctl", "offset", "zero", "grp", "group", "l", "r",
+        "left", "right", "front", "fore", "hind", "rear", "leg", "arm",
+    }
+
+    @classmethod
+    def _aligned_chain(cls, source, targets):
+        """Map a longer/shorter joint chain onto animator controls by role name."""
+        source = list(source)
+        targets = list(targets)
+        if not targets or len(source) == len(targets):
+            return source[:len(targets)]
+        if not source:
+            return []
+
+        source_parts = [cls._alignment_parts(node) for node in source]
+        result = [None] * len(targets)
+        used = set()
+        for target_index, target in enumerate(targets):
+            parts = cls._alignment_parts(target)
+            scores = [
+                (len(parts & candidate), index)
+                for index, candidate in enumerate(source_parts)
+                if index not in used
+            ]
+            if not scores:
+                continue
+            best_score = max(score for score, _index in scores)
+            best = [index for score, index in scores if score == best_score]
+            if best_score > 0 and len(best) == 1:
+                result[target_index] = source[best[0]]
+                used.add(best[0])
+
+        # Names are not always descriptive. Fill unresolved roles by their
+        # normalized position while preserving both chain endpoints.
+        for target_index, value in enumerate(result):
+            if value is not None:
+                continue
+            ratio = target_index / max(len(targets) - 1, 1)
+            preferred = int(ratio * (len(source) - 1) + 0.5)
+            available = [index for index in range(len(source)) if index not in used]
+            if not available:
+                available = list(range(len(source)))
+            chosen = min(available, key=lambda index: (abs(index - preferred), index))
+            result[target_index] = source[chosen]
+            used.add(chosen)
+        return result
+
+    @classmethod
+    def _alignment_parts(cls, node):
+        leaf = str(node).rsplit("|", 1)[-1].rsplit(":", 1)[-1]
+        leaf = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", leaf)
+        return {
+            part.lower() for part in re.split(r"[^A-Za-z0-9]+", leaf)
+            if part and part.lower() not in cls._ALIGNMENT_GENERIC_PARTS
+        }
+
     @staticmethod
     def _matrix_delta(left, right):
         rotation_indices = (0, 1, 2, 4, 5, 6, 8, 9, 10)
@@ -294,13 +391,15 @@ class MatchService:
         position = sqrt(sum((left[index] - right[index]) ** 2 for index in (12, 13, 14)))
         return rotation, position
 
-    def _straight_chain_direction(self, settings, projection, line):
+    def _straight_chain_direction(self, settings, projection, line, bend_joint=None):
         """Keep the current pole side, then fall back to the joint preferred angle."""
         direction = self._current_pole_direction(settings, projection, line)
         if self._has_stable_pole_direction(direction, line):
             return direction
 
-        direction = self._preferred_angle_direction(settings.middle_joint, line)
+        direction = self._preferred_angle_direction(
+            bend_joint or settings.middle_joint, line
+        )
         if self._length_sq(direction) > self._EPSILON:
             return direction
 

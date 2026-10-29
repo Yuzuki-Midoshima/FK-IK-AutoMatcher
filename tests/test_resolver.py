@@ -42,6 +42,21 @@ class ResolverContextTests(unittest.TestCase):
         result = self.resolver._context_candidates(nodes, "|PV_leg_CTRL", minimum=3)
         self.assertEqual(result, nodes[:3])
 
+    def test_scene_merge_preserves_quadruped_chain_length(self):
+        connected = MatchSettings(ik_controller="direct_ik")
+        scene = MatchSettings(
+            start_joint="hip", middle_joint="hock", end_joint="hoof",
+            deform_chain=["hip", "stifle", "hock", "hoof"],
+            fk_controllers=["fk_hip", "fk_stifle", "fk_hock", "fk_hoof"],
+            ik_joints=["ik_hip", "ik_stifle", "ik_hock", "ik_hoof"],
+        )
+
+        result = self.resolver._merge_resolution(connected, scene)
+
+        self.assertEqual(len(result.deform_joints), 4)
+        self.assertEqual(len(result.fk_controllers), 4)
+        self.assertEqual(len(result.ik_joints), 4)
+
     def test_camel_case_limb_name_is_recognized(self):
         nodes = ["upperLeftLeg_JNT", "lowerLeftLeg_JNT", "leftLegEnd_JNT", "spine_JNT"]
         result = self.resolver._context_candidates(nodes, "PV_leftLeg_CTRL", minimum=3)
@@ -75,6 +90,47 @@ class ResolverContextTests(unittest.TestCase):
         nodes = ["armA", "armA_mid", "armA_end", "armB", "armB_mid", "armB_end"]
         with self.assertRaisesRegex(ValueError, "Deform Chainを一意に解決できません"):
             resolver._best_deform_chain(nodes)
+
+    def test_hind_leg_branch_wins_over_equal_hair_chains(self):
+        class Cmds:
+            children = {
+                "pelvis": ["spine", "L_hind_hip_jnt"],
+                "L_hind_hip_jnt": ["L_stifle_jnt"],
+                "L_stifle_jnt": ["L_hock_jnt"],
+                "L_hock_jnt": ["L_hoof_jnt"],
+                "HAIR_11_00_jnt": ["HAIR_11_01_jnt"],
+                "HAIR_11_01_jnt": ["HAIR_11_02_jnt"],
+                "HAIR_11_02_jnt": ["HAIR_11_03_jnt"],
+                "HAIR_12_00_jnt": ["HAIR_12_01_jnt"],
+                "HAIR_12_01_jnt": ["HAIR_12_02_jnt"],
+                "HAIR_12_02_jnt": ["HAIR_12_03_jnt"],
+            }
+
+            def listRelatives(self, node, parent=False, children=False, **_kwargs):
+                if children:
+                    return self.children.get(node, [])
+                if parent:
+                    return [
+                        owner for owner, values in self.children.items()
+                        if node in values
+                    ]
+                return []
+
+        nodes = [
+            "pelvis", "spine", "L_hind_hip_jnt", "L_stifle_jnt",
+            "L_hock_jnt", "L_hoof_jnt",
+            "HAIR_11_00_jnt", "HAIR_11_01_jnt", "HAIR_11_02_jnt", "HAIR_11_03_jnt",
+            "HAIR_12_00_jnt", "HAIR_12_01_jnt", "HAIR_12_02_jnt", "HAIR_12_03_jnt",
+        ]
+        resolver = RigResolver(cmds_module=Cmds())
+
+        result = resolver._best_deform_chain(
+            nodes, "L_hind_hoof_CTRL", ["IK_L_hind_hip_jnt", "IK_L_hock_jnt"]
+        )
+
+        self.assertEqual(result, [
+            "L_hind_hip_jnt", "L_stifle_jnt", "L_hock_jnt", "L_hoof_jnt"
+        ])
 
     def test_rejects_ambiguous_switch_candidates(self):
         class Cmds:
@@ -240,6 +296,52 @@ class ResolverContextTests(unittest.TestCase):
         )
 
         self.assertEqual(result, "|rig|R_arm|PV_arm_R_CTRL")
+
+    def test_horse_pole_search_excludes_groups_and_prefers_main_leg_pv(self):
+        class Cmds:
+            @staticmethod
+            def nodeType(_node):
+                return "transform"
+
+            @staticmethod
+            def listConnections(_node):
+                return []
+
+        resolver = RigResolver(cmds_module=Cmds())
+        root = "|HORSE_RIG_GRP|HORSE_LEG_IK_CONTROLS_GRP|"
+        candidates = [
+            root + "IK_L_Hind_Hock_PV_anim_ZERO|IK_L_Hind_Hock_PV_anim_OFFSET|IK_L_Hind_Hock_PV_anim",
+            root + "IK_L_Hind_Hock_PV_anim_ZERO|IK_L_Hind_Hock_PV_anim_OFFSET",
+            root + "IK_L_Hind_Hock_PV_anim_ZERO",
+            root + "IK_L_Hind_PV_anim_ZERO|IK_L_Hind_PV_anim_OFFSET|IK_L_Hind_PV_anim",
+            root + "IK_L_Hind_PV_anim_ZERO|IK_L_Hind_PV_anim_OFFSET",
+            root + "IK_L_Hind_PV_anim_ZERO",
+        ]
+
+        controls = resolver._animator_controls(candidates)
+        result = resolver._pole_by_context(
+            controls, "IK_L_Hind_Foot_anim", ["IK_L_Hind_Hock_jnt"]
+        )
+
+        self.assertEqual(len(controls), 2)
+        self.assertEqual(resolver._leaf(result), "IK_L_Hind_PV_anim")
+
+    def test_explicit_hock_pv_selection_keeps_secondary_pole(self):
+        class Cmds:
+            @staticmethod
+            def nodeType(_node):
+                return "transform"
+
+            @staticmethod
+            def listConnections(_node):
+                return []
+
+        resolver = RigResolver(cmds_module=Cmds())
+        candidates = ["IK_L_Hind_PV_anim", "IK_L_Hind_Hock_PV_anim"]
+        self.assertEqual(
+            resolver._pole_by_context(candidates, "IK_L_Hind_Hock_PV_anim"),
+            "IK_L_Hind_Hock_PV_anim",
+        )
 
     def test_control_candidates_allow_joint_based_controller(self):
         class Cmds:

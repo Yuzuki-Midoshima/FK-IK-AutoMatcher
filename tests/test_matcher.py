@@ -40,7 +40,10 @@ class FakeCmds:
         return self.preferred[plug[-1]]
 
     def nodeType(self, node):
-        if node in {"start", "middle", "end", "ik1", "ik2", "ik3"}:
+        if node in {
+            "start", "middle", "stifle", "hock", "end",
+            "ik1", "ik2", "ik3", "ik4",
+        }:
             return "joint"
         return "transform"
 
@@ -61,6 +64,23 @@ def settings():
 
 
 class StraightChainTests(unittest.TestCase):
+    def test_four_joint_chain_uses_strongest_intermediate_bend(self):
+        cmds = FakeCmds(pole=(6.0, -3.0, 0.0))
+        cmds.positions.update({
+            "stifle": (3.0, 1.0, 0.0),
+            "hock": (6.0, 3.0, 0.0),
+        })
+        value = settings()
+        value.deform_chain = ["start", "stifle", "hock", "end"]
+        value.fk_controllers = ["fk1", "fk2", "fk3", "fk4"]
+        value.ik_joints = ["ik1", "ik2", "ik3", "ik4"]
+
+        service = MatchService(cmds)
+        service.fk_to_ik(value)
+
+        self.assertEqual(cmds.pole_result, (6.0, -1.0, 0.0))
+        self.assertTrue(any("hock" in line for line in service.last_debug_log))
+
     def test_positions_pole_by_world_rotate_pivot_not_translate(self):
         class OffsetPivotCmds(FakeCmds):
             def xform(self, node, query=False, worldSpace=False, translation=False,
@@ -123,6 +143,33 @@ class StraightChainTests(unittest.TestCase):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_allows_different_chain_lengths_for_quadruped_auxiliary_joints(self):
+        value = settings()
+        value.deform_chain = ["start", "stifle", "hock", "end"]
+        value.fk_controllers = ["fk1", "fk2", "fk3"]
+        value.ik_joints = ["ik1", "ik2", "ik3", "ik4"]
+        cmds = FakeCmds()
+        original = cmds.nodeType
+        cmds.nodeType = lambda node: (
+            "joint" if node in {"start", "stifle", "hock", "end", "ik4"}
+            else original(node)
+        )
+        self.assertEqual(MatchService(cmds).validate(value, "ik_to_fk"), [])
+
+    def test_aligns_horse_chain_nodes_by_anatomical_name(self):
+        source = [
+            "IK_L_Hind_Thigh_jnt", "IK_L_Hind_Calf_jnt",
+            "IK_L_Hind_Hock_jnt", "IK_L_Hind_Foot_jnt",
+        ]
+        targets = [
+            "FK_L_Hind_Thigh_anim", "FK_L_Hind_Calf_anim",
+            "FK_L_Hind_Foot_anim",
+        ]
+        self.assertEqual(MatchService._aligned_chain(source, targets), [
+            "IK_L_Hind_Thigh_jnt", "IK_L_Hind_Calf_jnt",
+            "IK_L_Hind_Foot_jnt",
+        ])
+
     def test_accepts_fk_controls_as_pose_reference_fallback(self):
         value = settings()
         value.start_joint, value.middle_joint, value.end_joint = value.fk_controllers

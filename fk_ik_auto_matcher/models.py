@@ -24,6 +24,9 @@ class MatchSettings:
     pole_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
     source: str = "manual"
     fk_joints: list[str] = field(default_factory=lambda: ["", "", ""])
+    # Full ordered pose chain. Empty means a legacy three-point setup and is
+    # intentionally kept optional so existing JSON files remain valid.
+    deform_chain: list[str] = field(default_factory=list)
     resolution_methods: dict[str, str] = field(default_factory=dict)
     resolution_confidence: dict[str, str] = field(default_factory=dict)
     resolution_errors: dict[str, str] = field(default_factory=dict)
@@ -47,7 +50,8 @@ class MatchSettings:
 
     @property
     def deform_joints(self) -> list[str]:
-        return [self.start_joint, self.middle_joint, self.end_joint]
+        chain = [node for node in self.deform_chain if node]
+        return chain or [self.start_joint, self.middle_joint, self.end_joint]
 
     @property
     def switch_plug(self) -> str:

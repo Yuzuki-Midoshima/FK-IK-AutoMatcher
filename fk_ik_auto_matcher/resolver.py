@@ -25,6 +25,12 @@ class RigResolver:
         "elbow": "arm", "forearm": "arm", "wrist": "arm", "hand": "arm",
         "leg": "leg", "hip": "leg", "thigh": "leg", "knee": "leg",
         "ankle": "leg", "foot": "leg", "toe": "leg",
+        # Common quadruped terminology. Treat fore/hind as leg descriptors;
+        # side (left/right) is scored independently.
+        "fore": "leg", "front": "leg", "hind": "leg", "rear": "leg",
+        "stifle": "leg", "hock": "leg", "fetlock": "leg",
+        "pastern": "leg", "hoof": "leg", "cannon": "leg",
+        "metacarpal": "leg", "metatarsal": "leg",
     }
     CHAIN_POSITIONS: ClassVar[dict[str, int]] = {
         "clavicle": 0, "shoulder": 0, "hip": 0, "thigh": 0,
@@ -33,7 +39,14 @@ class RigResolver:
     }
     NON_CONTROL_PARTS: ClassVar[set[str]] = {
         "const", "constraint", "handle", "jnt", "joint", "grp", "group",
-        "offset", "pad", "parent", "orient", "point", "scale",
+        "offset", "zero", "space", "driver", "pad", "parent", "orient",
+        "point", "scale",
+    }
+    ANIMATOR_CONTROL_PARTS: ClassVar[set[str]] = {
+        "anim", "ctrl", "control", "ctl",
+    }
+    POLE_SUBCHAIN_PARTS: ClassVar[set[str]] = {
+        "knee", "stifle", "hock", "fetlock", "pastern", "ankle", "toe",
     }
 
     def __init__(self, cmds_module=None):
@@ -87,7 +100,9 @@ class RigResolver:
             fallback.extend([""] * (size - len(fallback)))
             setattr(connected, field_name, [
                 direct[index] or fallback[index] for index in range(size)
-            ][:3])
+            ])
+        if not connected.deform_chain and scene.deform_chain:
+            connected.deform_chain = list(scene.deform_chain)
         if missing_switch:
             connected.switch_attribute = scene.switch_attribute
 
@@ -163,8 +178,9 @@ class RigResolver:
             ik_controller=str(data.get("ik_controller", "")),
             pole_controller=pole_controller,
             switch_controller=switch_node or str(data.get("settings_controller", "")),
-            fk_controllers=[fk[0], fk[index], fk[-1]],
-            ik_joints=[ik[0], ik[index], ik[-1]],
+            fk_controllers=fk,
+            ik_joints=ik,
+            deform_chain=deform,
             switch_attribute=switch_attr or "FKIK",
             pole_distance=float(data.get("pole_distance_multiplier", 5.0)),
             source="Rig Module Builder Manifest",
@@ -193,13 +209,15 @@ class RigResolver:
         joints = self._limb_candidates(joints, selected, minimum=3)
         fk_controls = self._ordered_chain(self._control_candidates(transforms, "fk"))
         ik_joints = self._ordered_chain(self._filter(joints, r"(^|_)IK(_|.*JNT)"))
-        deform = self._best_deform_chain(joints)
+        deform = self._best_deform_chain(
+            joints, selected, fk_controls + ik_joints
+        )
         ik_controls = self._control_candidates(transforms, "ik")
-        pole = self._unique_by_context(
-            self._controller_nodes(
+        pole = self._pole_by_context(
+            self._animator_controls(
                 self._filter(transforms, r"(^|_)(PV|POLE)(_|$)")
             ),
-            "Pole Controller", selected, fk_controls + ik_joints,
+            selected, fk_controls + ik_joints,
         )
         if not pole:
             pole = self._unique_chain_position(
@@ -227,20 +245,42 @@ class RigResolver:
             start_joint=deform[0], middle_joint=deform[len(deform)//2], end_joint=deform[-1],
             ik_controller=ik_controller, pole_controller=pole,
             switch_controller=switch_node,
-            fk_controllers=[fk_controls[0], fk_controls[len(fk_controls)//2], fk_controls[-1]],
-            ik_joints=[ik_joints[0], ik_joints[len(ik_joints)//2], ik_joints[-1]],
+            fk_controllers=fk_controls,
+            ik_joints=ik_joints,
+            deform_chain=deform,
             switch_attribute=switch_attr, source="Scene naming / connections",
         )
 
-    def _best_deform_chain(self, joints):
+    def _best_deform_chain(self, joints, selected="", context=()):
         excluded = [n for n in joints if not re.search(r"(^|_)(FK|IK)(_|$)", self._leaf(n), re.I)]
-        roots = [n for n in excluded if not (self.cmds.listRelatives(n, parent=True, type="joint") or [])]
+        node_set = set(excluded)
+
+        def candidate_children(node):
+            return [
+                child for child in (
+                    self.cmds.listRelatives(
+                        node, children=True, type="joint", fullPath=True
+                    ) or []
+                ) if child in node_set
+            ]
+
+        # A character skeleton branches at the pelvis/chest. Starting only at
+        # the global skeleton root stops before every limb. Start a candidate
+        # at each root *and* immediately after every branch instead.
+        roots = []
+        for node in excluded:
+            parents = self.cmds.listRelatives(
+                node, parent=True, type="joint", fullPath=True
+            ) or []
+            parent = parents[0] if len(parents) == 1 else ""
+            if parent not in node_set or len(candidate_children(parent)) != 1:
+                roots.append(node)
         chains = []
-        for root in roots or excluded:
+        for root in roots:
             chain = [root]
             current = root
             while True:
-                children = self.cmds.listRelatives(current, children=True, type="joint", fullPath=True) or []
+                children = candidate_children(current)
                 if len(children) != 1:
                     break
                 current = children[0]
@@ -249,11 +289,19 @@ class RigResolver:
                 chains.append(chain)
         if not chains:
             return []
-        maximum = max(map(len, chains))
-        longest = [chain for chain in chains if len(chain) == maximum]
-        if len(longest) > 1:
-            self._raise_ambiguous("Deform Chain", [chain[0] for chain in longest])
-        return longest[0]
+        search_context = [selected] + list(context)
+        scores = [
+            (sum(self._node_context_score(node, search_context) for node in chain),
+             len(chain), chain)
+            for chain in chains
+        ]
+        best_score = max(score for score, _length, _chain in scores)
+        scored = [item for item in scores if item[0] == best_score]
+        maximum = max(length for _score, length, _chain in scored)
+        best = [chain for _score, length, chain in scored if length == maximum]
+        if len(best) > 1:
+            self._raise_ambiguous("Deform Chain", [chain[0] for chain in best])
+        return best[0]
 
     def _switch_control(self, transforms, selected="", chain_nodes=()):
         candidates = []
@@ -380,6 +428,46 @@ class RigResolver:
             if node_type in ConnectionResolver.CONTROLLER_TYPES:
                 result.append(node)
         return result
+
+    def _animator_controls(self, nodes):
+        """Exclude ZERO/OFFSET/SPACE transforms surrounding animator controls."""
+        result = []
+        for node in self._controller_nodes(nodes):
+            parts = self._name_parts(node)
+            if parts & self.NON_CONTROL_PARTS:
+                continue
+            if parts & self.ANIMATOR_CONTROL_PARTS:
+                result.append(node)
+        return result
+
+    def _pole_by_context(self, candidates, selected="", context=()):
+        """Choose the main limb PV while allowing an explicitly selected sub-PV."""
+        if len(candidates) < 2:
+            return candidates[0] if candidates else ""
+        selected_names = {selected, self._leaf(selected)}
+        direct = [
+            node for node in candidates
+            if node in selected_names or self._leaf(node) in selected_names
+        ]
+        if len(direct) == 1:
+            return direct[0]
+
+        selected_parts = self._name_parts(selected)
+        selected_has_subchain = bool(selected_parts & self.POLE_SUBCHAIN_PARTS)
+        scores = []
+        for node in candidates:
+            score = self._node_context_score(node, [selected] + list(context))
+            # Quadruped rigs often have a primary leg PV plus a secondary hock
+            # PV. With no explicit hock selection, the unqualified limb PV is
+            # the correct control for the main FK/IK chain.
+            if not selected_has_subchain and self._name_parts(node) & self.POLE_SUBCHAIN_PARTS:
+                score -= 50
+            scores.append((score, node))
+        best_score = max(score for score, _node in scores)
+        best = [node for score, node in scores if score == best_score]
+        if len(best) > 1:
+            self._raise_ambiguous("Pole Controller", best)
+        return best[0]
 
     def _first(self, nodes, pattern):
         return next(iter(self._filter(nodes, pattern)), "")

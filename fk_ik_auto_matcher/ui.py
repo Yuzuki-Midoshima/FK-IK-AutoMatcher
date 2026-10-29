@@ -103,8 +103,20 @@ class MainWindow(QtWidgets.QDialog):
             form.addWidget(edit, row, 1)
             form.addWidget(button, row, 2)
             self.edits[key] = edit
+        chain_definitions = (
+            ("deform_chain", "Deform Chain (; separated)"),
+            ("fk_chain", "FK Control Chain (; separated)"),
+            ("ik_chain", "IK Joint Chain (; separated)"),
+        )
+        chain_start = len(definitions)
+        for offset, (key, label) in enumerate(chain_definitions):
+            edit = QtWidgets.QLineEdit()
+            edit.setPlaceholderText("Start; Mid; End  (quadrupeds may use 4+ nodes)")
+            form.addWidget(QtWidgets.QLabel(label), chain_start + offset, 0)
+            form.addWidget(edit, chain_start + offset, 1, 1, 2)
+            self.edits[key] = edit
         self.switch_attribute = QtWidgets.QLineEdit("FKIK")
-        setting_row = len(definitions)
+        setting_row = len(definitions) + len(chain_definitions)
         form.addWidget(QtWidgets.QLabel("切替属性"), setting_row, 0)
         form.addWidget(self.switch_attribute, setting_row, 1)
         self.fk_value = QtWidgets.QDoubleSpinBox()
@@ -236,19 +248,18 @@ class MainWindow(QtWidgets.QDialog):
             ("IK End Controller", settings.ik_controller, "ik_controller"),
             ("Pole Controller", settings.pole_controller, "pole_controller"),
         ]
-        positions = ("Start", "Mid", "End")
         entries.extend(
-            (f"FK {position} Controller", node, "fk_controllers")
-            for position, node in zip(positions, settings.fk_controllers)
+            (f"FK Controller {index}", node, "fk_controllers")
+            for index, node in enumerate(settings.fk_controllers, 1)
         )
         entries.extend(
-            (f"FK {position} Joint", node, "fk_joints")
-            for position, node in zip(positions, settings.fk_joints)
+            (f"FK Joint {index}", node, "fk_joints")
+            for index, node in enumerate(settings.fk_joints, 1)
             if node
         )
         entries.extend(
-            (f"IK {position} Joint", node, "ik_joints")
-            for position, node in zip(positions, settings.ik_joints)
+            (f"IK Joint {index}", node, "ik_joints")
+            for index, node in enumerate(settings.ik_joints, 1)
         )
         entries.append(("FKIK Switch", settings.switch_plug, "switch_plug"))
         for label, value, key in entries:
@@ -270,6 +281,18 @@ class MainWindow(QtWidgets.QDialog):
         return "\n".join(lines)
 
     def _settings(self):
+        def chain(key, fallback):
+            values = [value.strip() for value in self.edits[key].text().split(";")]
+            values = [value for value in values if value]
+            return values or fallback
+
+        deform = chain("deform_chain", [
+            self.edits["start_joint"].text().strip(),
+            self.edits["middle_joint"].text().strip(),
+            self.edits["end_joint"].text().strip(),
+        ])
+        fk = chain("fk_chain", [self.edits[f"fk_{i}"].text().strip() for i in range(3)])
+        ik = chain("ik_chain", [self.edits[f"ik_{i}"].text().strip() for i in range(3)])
         return MatchSettings(
             start_joint=self.edits["start_joint"].text().strip(),
             middle_joint=self.edits["middle_joint"].text().strip(),
@@ -277,8 +300,9 @@ class MainWindow(QtWidgets.QDialog):
             ik_controller=self.edits["ik_controller"].text().strip(),
             pole_controller=self.edits["pole_controller"].text().strip(),
             switch_controller=self.edits["switch_controller"].text().strip(),
-            fk_controllers=[self.edits[f"fk_{i}"].text().strip() for i in range(3)],
-            ik_joints=[self.edits[f"ik_{i}"].text().strip() for i in range(3)],
+            fk_controllers=fk,
+            ik_joints=ik,
+            deform_chain=deform,
             switch_attribute=self.switch_attribute.text().strip() or "FKIK",
             fk_value=self.fk_value.value(),
             ik_value=self.ik_value.value(),
@@ -290,10 +314,13 @@ class MainWindow(QtWidgets.QDialog):
         for key in ("start_joint", "middle_joint", "end_joint", "ik_controller",
                     "pole_controller", "switch_controller"):
             self.edits[key].setText(getattr(settings, key))
-        for index, value in enumerate(settings.fk_controllers):
+        for index, value in enumerate(settings.fk_controllers[:3]):
             self.edits[f"fk_{index}"].setText(value)
-        for index, value in enumerate(settings.ik_joints):
+        for index, value in enumerate(settings.ik_joints[:3]):
             self.edits[f"ik_{index}"].setText(value)
+        self.edits["deform_chain"].setText("; ".join(settings.deform_joints))
+        self.edits["fk_chain"].setText("; ".join(settings.fk_controllers))
+        self.edits["ik_chain"].setText("; ".join(settings.ik_joints))
         self.switch_attribute.setText(settings.switch_attribute)
         self.fk_value.setValue(settings.fk_value)
         self.ik_value.setValue(settings.ik_value)

@@ -22,6 +22,15 @@ class MatchSettingsTests(unittest.TestCase):
         value = MatchSettings(switch_controller="character:settings_CTRL")
         self.assertEqual(value.switch_plug, "character:settings_CTRL.FKIK")
 
+    def test_full_deform_chain_overrides_legacy_three_points(self):
+        value = MatchSettings(
+            start_joint="hip", middle_joint="hock", end_joint="hoof",
+            deform_chain=["hip", "stifle", "hock", "hoof"],
+        )
+        self.assertEqual(
+            value.deform_joints, ["hip", "stifle", "hock", "hoof"]
+        )
+
     def test_empty_switch_plug(self):
         self.assertEqual(MatchSettings().switch_plug, "")
 
